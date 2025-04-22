@@ -220,10 +220,14 @@ class FcpXmlWriter:
         ref_id, name, uid = key
         attrs = {"id": effect_res_id}
         attrs["name"] = name or "Placeholder Effect"
-        attrs["uid"] = uid or "com.apple.FinalCutPro.Motion.Source.Basic"
+        attrs["uid"] = uid # Set the UID
+
+        # *** Removed effectType addition as it's not valid in FCPXML 1.9 ***
+
         effect_elem = ET.Element("effect", **attrs)
         self.effect_elements[effect_res_id] = effect_elem
-        print(f"    Generated placeholder effect resource: id={effect_res_id} name={attrs['name']} uid={attrs['uid']}")
+        # Use the simpler print statement again
+        print(f"    Generated effect resource: id={effect_res_id} name={attrs['name']} uid={attrs['uid']}")
 
     def _add_markers_to_element(self, item_elem, otio_item):
         """Adds <marker> elements to a clip/gap element based on OTIO markers."""
