@@ -226,39 +226,63 @@ class FcpXmlWriter:
         print(f"    Generated placeholder effect resource: id={effect_res_id} name={attrs['name']} uid={attrs['uid']}")
 
     def _add_markers_to_element(self, item_elem, otio_item):
-        """Adds <marker> sub-elements to a given item element."""
-        if not hasattr(otio_item, 'markers'): return
+        """Adds <marker> elements to a clip/gap element based on OTIO markers."""
+        if not hasattr(otio_item, 'markers') or not otio_item.markers:
+            return
 
         print(f"[Debug] Adding markers for item: {otio_item.name}")
+        # Calculate the start time of the item within its parent context
+        # For Clips, use trimmed_range().start_time relative to the track start
+        # For Gaps or others (like the container gap), assume start at 0 relative to parent
+        # This might need adjustment if adding markers directly to sequences/tracks
+        if isinstance(otio_item, otio.schema.Clip) and hasattr(otio_item, 'trimmed_range'):
+             item_start_time = otio_item.trimmed_range().start_time
+        elif isinstance(otio_item, otio.schema.Gap):
+            # If it's the main container gap, its effective start is 0
+            # If it's an inner gap, its start is relative to its position in the track
+            # For simplicity here, assume gaps processed by this func are relative to 0
+             item_start_time = otio_item.source_range.start_time # Use Gap's source_range start
+        else:
+             # Fallback for items without a clear source_range/trimmed_range (e.g., Track?)
+             print(f"[Writer] Warning: Item '{otio_item.name}' type {type(otio_item)} lacks standard range for marker offset calculation. Assuming relative to 0.")
+             item_start_time = otio.opentime.RationalTime(0, self.global_rate)
+
+
         for marker in otio_item.markers:
-            try:
-                # Calculation depends on item having source_range (Clips do, others might not)
-                if not hasattr(otio_item, 'source_range') or otio_item.source_range is None:
-                    print(f"[Writer] Warning: Cannot calculate relative marker time for item '{otio_item.name}' without source_range. Skipping marker '{marker.name}'.")
-                    continue
+             try:
+                 # Calculate marker start time relative to the item's start time determined above
+                 marker_start_offset = marker.marked_range.start_time - item_start_time
 
-                marker_start_relative_to_clip = marker.marked_range.start_time - otio_item.source_range.start_time
-                marker_duration_otio = marker.marked_range.duration
+                 # Ensure marker offset isn't negative (marker starts before the item it's attached to)
+                 if marker_start_offset < otio.opentime.RationalTime(0, self.global_rate):
+                     print(f"[Writer] Warning: Marker '{marker.name}' start time {marker.marked_range.start_time} is before calculated item start {item_start_time}. Clamping offset to 0.")
+                     marker_start_offset = otio.opentime.RationalTime(0, self.global_rate)
 
-                one_frame_duration = otio.opentime.RationalTime(1, self.global_rate)
-                marker_duration_fcpxml = max(marker_duration_otio, one_frame_duration)
+                 marker_start_str = _fcpx_time_str(marker_start_offset)
 
-                marker_attrs = {
-                    "start": _fcpx_time_str(marker_start_relative_to_clip),
-                    "duration": _fcpx_time_str(marker_duration_fcpxml),
-                    "value": str(marker.name or "Marker")
-                }
-                if 'fcp_note' in marker.metadata:
-                    marker_attrs["note"] = str(marker.metadata['fcp_note'])
+                 # FCPXML marker duration is typically 1 frame for point markers
+                 marker_duration_rt = otio.opentime.RationalTime(1, self.global_rate)
+                 marker_duration_str = _fcpx_time_str(marker_duration_rt)
 
-                if marker_attrs.get("note") == "Downbeat":
-                    print(f"[Debug]     Setting marker '{marker_attrs['value']}' as To-Do (completed=0 for Red).")
-                    marker_attrs["completed"] = "0"
+                 marker_attrs = {
+                     "start": marker_start_str,
+                     "duration": marker_duration_str,
+                     "value": marker.name,  # Keep value for potential compatibility/debugging
+                     "note": marker.name    # *** Use note for the primary marker text ***
+                 }
 
-                marker_elem = ET.Element("marker", **marker_attrs)
-                item_elem.append(marker_elem)
-            except Exception as e:
-                print(f"[Writer] Error processing marker '{marker.name}' on item '{otio_item.name}': {e}")
+                 # Add completed attribute for 'To Do' (red) markers
+                 # Use 'downbeat' in name (case-insensitive) to signify a 'To Do' marker (red)
+                 if marker.name and "downbeat" in marker.name.lower():
+                     marker_attrs["completed"] = "0" # 0 for To Do (Red), 1 for Standard (Blue)
+                 # Add Chapter marker configuration if name contains 'chapter' (case-insensitive)
+                 elif marker.name and "chapter" in marker.name.lower():
+                      marker_attrs["configuration"] = "chapter" # FCPXML 1.9+ way for Chapter markers
+
+                 ET.SubElement(item_elem, "marker", attrib=marker_attrs)
+
+             except Exception as e:
+                 print(f"[Writer] Error processing marker '{marker.name}' on item '{otio_item.name}': {e}")
 
     def _create_asset_clip_element(self, item, track, lane, is_primary):
         """Creates an <asset-clip> element for an OTIO Clip with ExternalReference."""
