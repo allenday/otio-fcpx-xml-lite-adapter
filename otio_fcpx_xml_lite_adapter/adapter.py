@@ -7,6 +7,7 @@ import re
 from fractions import Fraction
 import os
 import xml.dom.minidom # Added for pretty printing
+import logging
 
 # Import shared utilities
 from otio_fcpx_xml_lite_adapter.utils import _fcpx_time_str, _parse_fcpx_time, _to_rational_time
@@ -14,6 +15,8 @@ from otio_fcpx_xml_lite_adapter.utils import _fcpx_time_str, _parse_fcpx_time, _
 from otio_fcpx_xml_lite_adapter.writer import FcpXmlWriter
 # Import the reader class
 from otio_fcpx_xml_lite_adapter.reader import FcpXmlReader
+
+logger = logging.getLogger(__name__)
 
 # --- Time Parsing Utilities ---
 
@@ -32,7 +35,8 @@ def read_from_string(input_str):
         return reader.build_timeline()
     except Exception as e:
         # Catch errors during reader initialization or building
-        print(f"Error during FcpXmlReader process: {type(e).__name__} - {e}")
+        # print(f"Error during FcpXmlReader process: {type(e).__name__} - {e}")
+        logger.error(f"Error during FcpXmlReader process: {type(e).__name__} - {e}", exc_info=True)
         # Re-raise as OTIOError or handle appropriately
         raise otio.exceptions.OTIOError(f"Failed to parse FCPXML: {e}")
 
@@ -57,7 +61,8 @@ def write_to_string(input_otio):
         return writer.build_xml_string()
     except Exception as e:
         # Catch errors during writer initialization or building
-        print(f"Error during FcpXmlWriter process: {type(e).__name__} - {e}")
+        # print(f"Error during FcpXmlWriter process: {type(e).__name__} - {e}")
+        logger.error(f"Error during FcpXmlWriter process: {type(e).__name__} - {e}", exc_info=True)
         # Re-raise as OTIOError or handle appropriately
         raise otio.exceptions.OTIOError(f"Failed to generate FCPXML: {e}")
 

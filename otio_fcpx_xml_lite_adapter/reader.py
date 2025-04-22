@@ -5,15 +5,18 @@ import opentimelineio as otio
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 import os
-
+import logging
 # Import shared utilities
 from otio_fcpx_xml_lite_adapter.utils import _parse_fcpx_time, _to_rational_time
+
+logger = logging.getLogger(__name__)
 
 class FcpXmlReader:
     """Handles the conversion of an FCPXML string to an OTIO Timeline."""
 
     def __init__(self, input_str: str):
-        print("[Reader] Initializing FcpXmlReader")
+        # print("[Reader] Initializing FcpXmlReader")
+        logger.info("Initializing FcpXmlReader")
         try:
             self.root = ET.fromstring(input_str)
         except ET.ParseError as e:
@@ -22,7 +25,8 @@ class FcpXmlReader:
         self.fcpxml_version = self.root.tag == 'fcpxml' and self.root.get('version')
         if not self.fcpxml_version:
             raise otio.exceptions.OTIOError("Not a valid FCPXML document (missing <fcpxml> root or version).")
-        print(f"[Reader] Parsing FCPXML version: {self.fcpxml_version}")
+        # print(f"[Reader] Parsing FCPXML version: {self.fcpxml_version}")
+        logger.info(f"Parsing FCPXML version: {self.fcpxml_version}")
 
         self.resources_root = self.root.find('resources')
         self.library_root = self.root.find('library')
@@ -55,9 +59,11 @@ class FcpXmlReader:
 
     def _parse_resources(self):
         """Parses format, asset, and effect elements from the resources block."""
-        print("[Reader] Parsing resources")
+        # print("[Reader] Parsing resources")
+        logger.info("Parsing resources")
         if self.resources_root is None:
-            print("[Reader] Warning: No <resources> block found.")
+            # print("[Reader] Warning: No <resources> block found.")
+            logger.warning("No <resources> block found.")
             return
 
         for fmt in self.resources_root.findall('format'):
@@ -69,11 +75,13 @@ class FcpXmlReader:
         for effect in self.resources_root.findall('effect'):
             effect_id = effect.get('id')
             if effect_id: self.effects[effect_id] = effect
-        print(f"[Reader] Found: {len(self.formats)} formats, {len(self.assets)} assets, {len(self.effects)} effects")
+        # print(f"[Reader] Found: {len(self.formats)} formats, {len(self.assets)} assets, {len(self.effects)} effects")
+        logger.info(f"Found: {len(self.formats)} formats, {len(self.assets)} assets, {len(self.effects)} effects")
 
     def _parse_sequence_info(self):
         """Parses top-level sequence attributes like name, rate, start time."""
-        print("[Reader] Parsing sequence info")
+        # print("[Reader] Parsing sequence info")
+        logger.info("Parsing sequence info")
         self.seq_name = self.sequence_element.get('name', 'Untitled Sequence')
         seq_format_id = self.sequence_element.get('format')
         seq_tc_start_str = self.sequence_element.get('tcStart', '0s')
@@ -90,17 +98,20 @@ class FcpXmlReader:
             rate_fraction = 1 / _parse_fcpx_time(frame_duration_str)
             self.global_rate = float(rate_fraction)
             if self.global_rate.is_integer(): self.global_rate = int(self.global_rate)
-            else: print(f"[Reader] Warning: Non-integer rate {self.global_rate} derived.")
+            # else: print(f"[Reader] Warning: Non-integer rate {self.global_rate} derived.")
+            else: logger.warning(f"Non-integer rate {self.global_rate} derived from frameDuration.")
         except Exception as e:
             raise otio.exceptions.OTIOError(f"Could not parse frameDuration '{frame_duration_str}': {e}")
 
         start_time_frac = _parse_fcpx_time(seq_tc_start_str)
         self.global_start_time = _to_rational_time(start_time_frac, self.global_rate)
-        print(f"[Reader] Sequence: '{self.seq_name}', Rate: {self.global_rate}, Start: {self.global_start_time}")
+        # print(f"[Reader] Sequence: '{self.seq_name}', Rate: {self.global_rate}, Start: {self.global_start_time}")
+        logger.info(f"Sequence: '{self.seq_name}', Rate: {self.global_rate}, Start: {self.global_start_time}")
 
     def _create_timeline(self):
         """Initializes the OTIO Timeline object."""
-        print("[Reader] Creating timeline object")
+        # print("[Reader] Creating timeline object")
+        logger.info("Creating timeline object")
         self.timeline = otio.schema.Timeline(name=self.seq_name, global_start_time=self.global_start_time)
         self.timeline.metadata['fcpx_version'] = self.fcpxml_version
 
@@ -119,7 +130,8 @@ class FcpXmlReader:
             start_frac = _parse_fcpx_time(start_str)
 
             if duration_frac is None or duration_frac <= 0:
-                print(f"[Reader] Warning: Skipping element '{name}' with invalid duration '{duration_str}'.")
+                # print(f"[Reader] Warning: Skipping element '{name}' with invalid duration '{duration_str}'.")
+                logger.warning(f"Skipping element '{name}' with invalid duration '{duration_str}'.")
                 continue
 
             item_seq_start_rt = parent_offset_rt + _to_rational_time(offset_frac if offset_frac is not None else Fraction(0), self.global_rate)
@@ -129,7 +141,8 @@ class FcpXmlReader:
             lane = 0
             if lane_str is not None:
                 try: lane = int(lane_str)
-                except ValueError: print(f"[Reader] Warning: Invalid lane '{lane_str}' for '{name}'. Using 0.")
+                # except ValueError: print(f"[Reader] Warning: Invalid lane '{lane_str}' for '{name}'. Using 0.")
+                except ValueError: logger.warning(f"Invalid lane '{lane_str}' for '{name}'. Using 0.")
             if lane not in self.items_by_lane: self.items_by_lane[lane] = []
 
             otio_item = None
@@ -139,7 +152,8 @@ class FcpXmlReader:
             if tag == 'asset-clip':
                 otio_item = self._create_otio_asset_clip(element, name, start_frac, duration_rt, item_metadata)
             elif tag == 'gap':
-                print(f"[Reader] Processing items inside gap '{name}' starting at {item_seq_start_rt}")
+                # print(f"[Reader] Processing items inside gap '{name}' starting at {item_seq_start_rt}")
+                logger.debug(f"Processing items inside gap '{name}' starting at {item_seq_start_rt}")
                 self._process_spine_elements(element, item_seq_start_rt) # Recurse
                 continue # Don't add gap item itself yet
             elif tag == 'title':
@@ -147,7 +161,8 @@ class FcpXmlReader:
             elif tag == 'video':
                 otio_item = self._create_otio_video_placeholder(element, name, duration_rt, item_metadata)
             else:
-                print(f"[Reader] Warning: Unhandled element type '{tag}' in spine: '{name}'. Treating as Gap.")
+                # print(f"[Reader] Warning: Unhandled element type '{tag}' in spine: '{name}'. Treating as Gap.")
+                logger.warning(f"Unhandled element type '{tag}' in spine: '{name}'. Treating as Gap.")
                 otio_item = otio.schema.Gap(name=name, source_range=otio.opentime.TimeRange(duration=duration_rt))
 
             if otio_item:
@@ -244,11 +259,14 @@ class FcpXmlReader:
 
     def _parse_spine(self):
         """Parses the main <spine> element to populate items_by_lane."""
-        print("[Reader] Parsing spine")
+        # print("[Reader] Parsing spine")
+        logger.info("Parsing spine")
         spine = self.sequence_element.find('spine')
         if spine is None:
-            print("[Reader] Warning: Sequence has no <spine>.")
+            logger.warning("No <spine> found in sequence. Timeline will be empty.")
             return
+
+        # Initial call starts with the sequence's global start time as the base offset
         self._process_spine_elements(spine, self.global_start_time)
 
     def _build_timeline_tracks(self):
@@ -285,12 +303,10 @@ class FcpXmlReader:
                     track_cursor = max(track_cursor, item_range.end_time_exclusive())
 
             stack.append(track)
-        print(f"[Reader] Built {len(stack)} tracks.")
+        logger.info(f"[Reader] Built {len(stack)} tracks.")
 
     def build_timeline(self) -> otio.schema.Timeline:
-        """Orchestrates the parsing and building process, returns the OTIO Timeline."""
-        print("[Reader] Starting timeline build...")
+        """Builds and returns the final OTIO Timeline object."""
         self._parse_spine()
         self._build_timeline_tracks()
-        print("[Reader] Timeline build finished.")
         return self.timeline 

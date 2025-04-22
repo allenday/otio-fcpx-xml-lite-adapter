@@ -13,6 +13,9 @@ from fractions import Fraction
 # Import from utils instead
 from otio_fcpx_xml_lite_adapter.utils import _fcpx_time_str
 
+import logging
+logger = logging.getLogger(__name__)
+
 class FcpXmlWriter:
     """Handles the conversion of an OTIO Timeline to an FCPXML string."""
 
@@ -23,7 +26,7 @@ class FcpXmlWriter:
             )
 
         self.timeline = input_otio
-        print("[Writer] Initializing FcpXmlWriter")
+        logger.info("Initializing FcpXmlWriter")
 
         # Basic structure setup
         self.version = self.timeline.metadata.get('fcpx_version', '1.9') # Use stored version or default
@@ -47,7 +50,7 @@ class FcpXmlWriter:
         # Timing and Structure State
         self.global_start_time = self.timeline.global_start_time
         if self.global_start_time is None:
-            print("[Writer] Warning: OTIO timeline missing global_start_time. Defaulting to 0 @ 24fps.")
+            logger.warning("OTIO timeline missing global_start_time. Defaulting to 0 @ 24fps.")
             self.global_start_time = otio.opentime.RationalTime(0, 24)
         self.global_rate = self.global_start_time.rate
         self.timeline_duration = self.timeline.duration()
@@ -106,7 +109,7 @@ class FcpXmlWriter:
 
     def _ensure_sequence_format(self):
         """Ensures the sequence format resource is created."""
-        print("[Writer] Ensuring sequence format.")
+        logger.info("Ensuring sequence format.")
         self.sequence_format_id = self._ensure_resource(
             self.global_rate,
             self.resource_map_formats,
@@ -116,9 +119,9 @@ class FcpXmlWriter:
 
     def _create_sequence_element(self):
         """Creates the main <sequence> element."""
-        print("[Writer] Creating sequence element.")
-        print(f"[Debug] OTIO Timeline Duration: {self.timeline_duration} ({self.timeline_duration.value / self.timeline_duration.rate:.3f}s)")
-        print(f"[Debug] Calculated sequence duration attribute: {self.seq_duration_str}")
+        logger.info("Creating sequence element.")
+        logger.debug(f"OTIO Timeline Duration: {self.timeline_duration} ({self.timeline_duration.value / self.timeline_duration.rate:.3f}s)")
+        logger.debug(f"Calculated sequence duration attribute: {self.seq_duration_str}")
         self.sequence = ET.SubElement(self.project, "sequence",
                                      format=self.sequence_format_id,
                                      duration=self.seq_duration_str,
@@ -129,7 +132,7 @@ class FcpXmlWriter:
 
     def _map_tracks_to_lanes(self):
         """Determines FCPXML lane mapping for OTIO tracks."""
-        print("[Writer] Mapping tracks to lanes.")
+        logger.info("Mapping tracks to lanes.")
         video_lane_counter = 1
         audio_lane_counter = -1
         potential_primary_track = None
@@ -171,12 +174,12 @@ class FcpXmlWriter:
                  audio_lane_counter -= 1
 
         if not primary_assigned:
-             print("[Writer] Warning: No primary video track identified or assigned lane 1.")
+             logger.warning("No primary video track identified or assigned lane 1.")
 
 
     def _create_main_container_gap(self):
         """Creates the main container <gap> inside the <spine>."""
-        print("[Writer] Creating main container gap.")
+        logger.info("Creating main container gap.")
         self.spine = ET.SubElement(self.sequence, "spine")
         self.main_container_gap = ET.SubElement(self.spine, "gap",
                                            name="Timeline Container",
@@ -213,7 +216,7 @@ class FcpXmlWriter:
                              audioRate="48k", audioChannels="2") # Defaults
         ET.SubElement(asset, "media-rep", kind="original-media", src=url_key)
         self.asset_elements[asset_id] = asset
-        print(f"[Writer] Created minimal asset resource: {asset_id} (Needs context improvement)")
+        logger.debug(f"[Created minimal asset resource: {asset_id} (Needs context improvement)")
 
     def _create_effect_element(self, effect_res_id, key):
         """Creates an <effect> element and adds it to self.effect_elements."""
@@ -227,14 +230,14 @@ class FcpXmlWriter:
         effect_elem = ET.Element("effect", **attrs)
         self.effect_elements[effect_res_id] = effect_elem
         # Use the simpler print statement again
-        print(f"    Generated effect resource: id={effect_res_id} name={attrs['name']} uid={attrs['uid']}")
+        logger.debug(f"Generated effect resource: id={effect_res_id} name={attrs['name']} uid={attrs['uid']}")
 
     def _add_markers_to_element(self, item_elem, otio_item):
         """Adds <marker> elements to a clip/gap element based on OTIO markers."""
         if not hasattr(otio_item, 'markers') or not otio_item.markers:
             return
 
-        print(f"[Debug] Adding markers for item: {otio_item.name}")
+        logger.debug(f"Adding markers for item: {otio_item.name}")
         # Calculate the start time of the item within its parent context
         # For Clips, use trimmed_range().start_time relative to the track start
         # For Gaps or others (like the container gap), assume start at 0 relative to parent
@@ -248,7 +251,7 @@ class FcpXmlWriter:
              item_start_time = otio_item.source_range.start_time # Use Gap's source_range start
         else:
              # Fallback for items without a clear source_range/trimmed_range (e.g., Track?)
-             print(f"[Writer] Warning: Item '{otio_item.name}' type {type(otio_item)} lacks standard range for marker offset calculation. Assuming relative to 0.")
+             logger.warning(f"Item '{otio_item.name}' type {type(otio_item)} lacks standard range for marker offset calculation. Assuming relative to 0.")
              item_start_time = otio.opentime.RationalTime(0, self.global_rate)
 
 
@@ -259,7 +262,7 @@ class FcpXmlWriter:
 
                  # Ensure marker offset isn't negative (marker starts before the item it's attached to)
                  if marker_start_offset < otio.opentime.RationalTime(0, self.global_rate):
-                     print(f"[Writer] Warning: Marker '{marker.name}' start time {marker.marked_range.start_time} is before calculated item start {item_start_time}. Clamping offset to 0.")
+                     logger.warning(f"Marker '{marker.name}' start time {marker.marked_range.start_time} is before calculated item start {item_start_time}. Clamping offset to 0.")
                      marker_start_offset = otio.opentime.RationalTime(0, self.global_rate)
 
                  marker_start_str = _fcpx_time_str(marker_start_offset)
@@ -286,7 +289,7 @@ class FcpXmlWriter:
                  ET.SubElement(item_elem, "marker", attrib=marker_attrs)
 
              except Exception as e:
-                 print(f"[Writer] Error processing marker '{marker.name}' on item '{otio_item.name}': {e}")
+                 logger.error(f"Error processing marker '{marker.name}' on item '{otio_item.name}': {e}")
 
     def _create_asset_clip_element(self, item, track, lane, is_primary):
         """Creates an <asset-clip> element for an OTIO Clip with ExternalReference."""
@@ -312,7 +315,7 @@ class FcpXmlWriter:
                                  audioRate="48k", audioChannels="2") # Defaults
             ET.SubElement(asset, "media-rep", kind="original-media", src=url_key)
             self.asset_elements[asset_id] = asset
-            print(f"[Writer] Created asset resource: {asset_id}")
+            logger.debug(f"Created asset resource: {asset_id}")
 
         # Ensure asset exists, creating it with context if needed
         asset_id = self._ensure_resource(media_url, self.resource_map_assets, self.asset_elements, _create_asset_with_context)
@@ -326,7 +329,7 @@ class FcpXmlWriter:
         }
         # Asset clips always get lane attribute in container gap structure
         clip_elem_attrs["lane"] = str(lane)
-        print(f"[Debug]     Adding Lane Attr (Container): {lane}")
+        logger.debug(f"Adding Lane Attr (Container): {lane}")
 
         item_elem = ET.Element("asset-clip", **clip_elem_attrs)
 
@@ -351,7 +354,7 @@ class FcpXmlWriter:
             effect_key = (fcpx_ref, effect_name, effect_uid)
             effect_res_id = self._ensure_resource(effect_key, self.resource_map_effects, self.effect_elements, self._create_effect_element)
         else:
-            print(f"[Writer] Warning: {media_ref.generator_kind} generator missing fcpx_ref parameter.")
+            logger.warning(f"{media_ref.generator_kind} generator missing fcpx_ref parameter.")
 
         common_attrs = {
             "name": item.name or "Generator",
@@ -364,19 +367,19 @@ class FcpXmlWriter:
             common_attrs["ref"] = effect_res_id
 
         if media_ref.generator_kind == "fcpx_title":
-            print(f"[Debug]     Title Attrs: {common_attrs}")
+            logger.debug(f"Title Attrs: {common_attrs}")
             item_elem = ET.Element("title", **common_attrs)
             text_style_ref_id = "ts_basic"
             text_style = ET.SubElement(ET.SubElement(item_elem, "text"), "text-style", ref=text_style_ref_id)
             text_style.text = media_ref.parameters.get('text', item.name or "Title Text")
 
         elif media_ref.generator_kind == "fcpx_video_placeholder":
-            print(f"[Debug]     Video Attrs: {common_attrs}")
+            logger.debug(f"Video Attrs: {common_attrs}")
             item_elem = ET.Element("video", **common_attrs)
 
         else:
             # Fallback for unknown generators (won't have element created, handled in main loop)
-            print(f"[Writer]   Unhandled GeneratorReference kind '{media_ref.generator_kind}'. Treating as implicit gap.")
+            logger.warning(f"Unhandled GeneratorReference kind '{media_ref.generator_kind}'. Treating as implicit gap.")
             return None # Don't create an element
 
         if item_elem is not None:
@@ -388,15 +391,15 @@ class FcpXmlWriter:
 
     def _populate_container_gap(self):
         """Iterates tracks and populates the main container gap."""
-        print("[Writer] Populating main container gap.")
+        logger.info("Populating main container gap.")
         for track in self.timeline.tracks:
             if track not in self.track_lane_map:
-                print(f"[Writer] Skipping track '{track.name}' with unhandled kind '{track.kind}'.")
+                logger.warning(f"Skipping track '{track.name}' with unhandled kind '{track.kind}'.")
                 continue
 
             lane = self.track_lane_map[track]
             is_primary_track = (track.kind == otio.schema.TrackKind.Video and lane == self.primary_track_lane)
-            print(f"[Writer] Processing track '{track.name}' (Kind: {track.kind}) -> Lane {lane} {'(Primary)' if is_primary_track else ''}")
+            logger.info(f"Processing track '{track.name}' (Kind: {track.kind}) -> Lane {lane} {'(Primary)' if is_primary_track else ''}")
 
             for item in track:
                 item_elem = None
@@ -408,20 +411,20 @@ class FcpXmlWriter:
                     elif isinstance(media_ref, otio.schema.GeneratorReference):
                          item_elem = self._create_generator_element(item, track, lane, is_primary_track, media_ref)
                     elif isinstance(media_ref, otio.schema.MissingReference):
-                         print(f"[Writer] Warning: Cannot write MissingReference '{item.name}'. Skipping.")
+                         logger.warning(f"Cannot write MissingReference '{item.name}'. Skipping.")
                          continue
                     else:
-                         print(f"[Writer] Warning: Unhandled media ref type {type(media_ref)} for clip '{item.name}'. Skipping.")
+                         logger.warning(f"Unhandled media ref type {type(media_ref)} for clip '{item.name}'. Skipping.")
                          continue
 
                 elif isinstance(item, otio.schema.Gap):
                     # Inner gaps are not added to the container gap structure
                     if is_primary_track:
-                         print(f"[Writer] Skipping creation of inner gap element: {item.name}")
+                        logger.debug(f"Skipping creation of inner gap element on primary track: {item.name}")
                     continue # Always skip adding Gap elements inside the container
 
                 else:
-                     print(f"[Writer] Warning: Skipping unhandled item type {type(item)} in track '{track.name}'")
+                     logger.warning(f"Skipping unhandled item type {type(item)} in track '{track.name}'")
                      continue
 
                 if item_elem is not None:
@@ -430,7 +433,7 @@ class FcpXmlWriter:
 
     def _finalize_resources(self):
         """Adds all collected resource elements to the <resources> section."""
-        print("[Writer] Finalizing resources.")
+        logger.info("Finalizing resources.")
         for fmt_id in sorted(self.format_elements.keys()):
             self.resources.append(self.format_elements[fmt_id])
         for asset_id in sorted(self.asset_elements.keys()):
@@ -441,7 +444,7 @@ class FcpXmlWriter:
 
     def _serialize_xml(self) -> str:
         """Serializes the final XML tree to a pretty-printed string."""
-        print("[Writer] Serializing XML.")
+        logger.info("Serializing XML.")
         rough_string = ET.tostring(self.root, encoding='unicode')
         pretty_xml = "" # Initialize
         try:
@@ -449,10 +452,10 @@ class FcpXmlWriter:
             # minidom adds its own declaration, handle it below
             pretty_xml_bytes = reparsed.toprettyxml(indent="  ", encoding="utf-8")
             pretty_xml = pretty_xml_bytes.decode("utf-8")
-            print("[Writer] Successfully indented XML using minidom.")
+            logger.info("Successfully indented XML using minidom.")
         except Exception as e:
-            print(f"[Writer] Error during minidom indentation: {e}")
-            print("[Writer] Falling back to unindented XML.")
+            logger.error(f"Error during minidom indentation: {e}")
+            logger.error("Falling back to unindented XML.")
             # Fallback uses the rough string which doesn't have the extra declaration
             pretty_xml = rough_string # Assign rough_string here
 
@@ -478,7 +481,7 @@ class FcpXmlWriter:
 
     def build_xml_string(self) -> str:
         """Builds and returns the complete FCPXML string."""
-        print("[Writer] Starting XML build process...")
+        logger.info("Starting XML build process...")
         # Population happens via helper methods called during __init__ and here
         self._populate_container_gap()
         self._finalize_resources()
