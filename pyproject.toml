@@ -6,10 +6,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "otio-fcpx-xml-lite-adapter"
-version = "1.1.0"
-description = "OpenTimelineIO FCP X XML Adapter"
+version = "0.1.0"
+description = "OpenTimelineIO FCP X XML Lite Adapter"
 authors = [
-  { name="Contributors to the OpenTimelineIO project", email="otio-discussion@lists.aswf.io" },
+  { name="Allen Day", email="allenday@allenday.com" },
 ]
 license = { file="LICENSE" }
 readme = "README.md"

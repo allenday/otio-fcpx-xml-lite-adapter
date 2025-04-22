@@ -1,25 +1,132 @@
 # otio-fcpx-xml-lite-adapter
 
-OpenTimelineIO adapter for basic Final Cut Pro X XML (.fcpxml) support.
+[![PyPI version](https://badge.fury.io/py/otio-fcpx-xml-lite-adapter.svg)](https://badge.fury.io/py/otio-fcpx-xml-lite-adapter) <!-- Placeholder - Update if published -->
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Tests](https://github.com/allenday/otio-fcpx-xml-lite-adapter/actions/workflows/test.yml/badge.svg)](https://github.com/allenday/otio-fcpx-xml-lite-adapter/actions/workflows/test.yml) <!-- Placeholder - Update if using GH Actions -->
 
-## Status
+An [OpenTimelineIO](https://github.com/AcademySoftwareFoundation/OpenTimelineIO) adapter for converting between OTIO timelines and a simplified interpretation of Final Cut Pro X XML (`.fcpxml`), focusing on marker and basic structure round-tripping.
 
-Work in progress.
+## Overview
+
+This adapter provides basic read and write capabilities for FCPXML files (tested primarily with v1.9 and v1.13 structures), allowing interchange with OTIO. It is designed to be "lite", meaning it handles core timeline structures, clips, and markers but may not support all advanced FCPXML features.
+
+Its development has focused on specific use cases, such as:
+*   Transferring marker data (e.g., beat markers from JSON) onto placeholder clips within an FCPXML structure.
+*   Round-tripping timelines with basic audio/video clips and markers.
+
+## Features
+
+*   **Reader:**
+    *   Parses FCPXML v1.9+ (tested with v1.13).
+    *   Reads `<sequence>`, `<spine>`, `<gap>`, `<asset-clip>`, `<video>` (as placeholders), and `<marker>` elements.
+    *   Handles basic resources (`<format>`, `<asset>`, `<effect>`).
+    *   Interprets lanes for track mapping.
+    *   Creates OTIO `Timeline`, `Track`, `Clip`, `Gap`, `Marker`, `ExternalReference`, and `GeneratorReference` objects.
+*   **Writer:**
+    *   Generates FCPXML v1.9 structure.
+    *   Writes OTIO `Timeline`, `Track` (Video/Audio), `Clip`, `Gap`, `Marker`.
+    *   Maps OTIO tracks to FCPXML lanes.
+    *   Handles `ExternalReference` (creating `<asset-clip>`) and `GeneratorReference` (creating `<video>` or `<title>` placeholders using `<effect>` resources).
+    *   Supports placing markers on clips.
+    *   Includes logic for time quantization.
+    *   Creates necessary `<resources>` (format, asset, effect).
+*   **Utilities:** Includes functions for parsing and formatting FCPXML time strings (`N/Ds`).
+*   **Diagnostics:** Uses Python's `logging` module.
+
+## Limitations
+
+*   **Lite Scope:** This adapter intentionally does not aim to support the full FCPXML specification. Features like complex effects, transitions, audio adjustments beyond basic roles, multicam clips, detailed metadata mapping, etc., are likely **not** supported or may be handled in a simplified manner.
+*   **Simplifying Assumptions:** The reader and writer might make assumptions about the structure (e.g., expecting a main container gap in the spine for writing).
+*   **Metadata:** Minimal metadata transfer beyond basic names and resource links.
 
 ## Installation
 
+You can install the adapter from PyPI (if published):
+
 ```bash
+pip install otio-fcpx-xml-lite-adapter
+```
+
+Or, for development, clone the repository and install in editable mode:
+
+```bash
+git clone https://github.com/allenday/otio-fcpx-xml-lite-adapter.git
+cd otio-fcpx-xml-lite-adapter
 pip install -e .
 ```
 
 ## Usage
 
+Use the adapter like any other standard OTIO adapter via the `opentimelineio.adapters` module. The adapter name is `otio_fcpx_xml_lite_adapter`.
+
 ```python
 import opentimelineio as otio
 
-# Read
-timeline = otio.adapters.read_from_file("your_sequence.fcpxml")
+# --- Reading ---
+try:
+    # Specify the adapter name if it's not automatically detected
+    timeline = otio.adapters.read_from_file(
+        "input_sequence.fcpxml",
+        adapter_name="otio_fcpx_xml_lite_adapter"
+    )
+    print(f"Successfully read timeline: {timeline.name}")
+    # ... process the timeline ...
 
-# Write
-otio.adapters.write_to_file(timeline, "output.fcpxml")
-``` 
+except otio.exceptions.OTIOError as e:
+    print(f"Error reading FCPXML: {e}")
+
+# --- Writing ---
+# Assume 'my_timeline' is an existing otio.schema.Timeline object
+output_path = "output_sequence.fcpxml"
+try:
+    otio.adapters.write_to_file(
+        my_timeline,
+        output_path,
+        adapter_name="otio_fcpx_xml_lite_adapter"
+    )
+    print(f"Successfully wrote timeline to: {output_path}")
+
+except otio.exceptions.OTIOError as e:
+    print(f"Error writing FCPXML: {e}")
+
+# --- Reading/Writing Strings ---
+# fcpxml_string = otio.adapters.write_to_string(my_timeline, adapter_name="otio_fcpx_xml_lite_adapter")
+# timeline_from_string = otio.adapters.read_from_string(fcpxml_string, adapter_name="otio_fcpx_xml_lite_adapter")
+```
+
+*Note: Explicitly specifying `adapter_name="otio_fcpx_xml_lite_adapter"` might be necessary if the default OTIO plugin loading doesn't pick it up automatically or if other FCPXML adapters are present.*
+
+## Development
+
+### Setup
+
+1.  Clone the repository.
+2.  Create and activate a virtual environment (recommended).
+3.  Install in editable mode with test dependencies:
+    ```bash
+    pip install -e .[dev]
+    ```
+    *(Note: Define `[dev]` extras in `pyproject.toml` if needed for test dependencies like `pytest`)*
+
+### Running Tests
+
+Tests are written using `unittest` and can be run with `pytest`:
+
+```bash
+pytest
+```
+
+Or run specific files:
+
+```bash
+pytest tests/test_writer.py
+pytest tests/test_roundtrip.py
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to open issues or submit pull requests.
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details. 
