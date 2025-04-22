@@ -13,6 +13,7 @@ from otio_fcpx_xml_lite_adapter.utils import _fcpx_time_str
 from otio_fcpx_xml_lite_adapter.writer import FcpXmlWriter
 #from otio_fcpx_xml_lite_adapter import utils
 import re
+import logging
 
 
 SAMPLE_XML = os.path.join(
@@ -20,6 +21,8 @@ SAMPLE_XML = os.path.join(
     "data",
     "slutpop.fcpxml"
 )
+
+logger = logging.getLogger(__name__)
 
 class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
     """
@@ -30,47 +33,138 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         super().__init__(*args, **kwargs)
         self.maxDiff = None
 
-    def test_roundtrip(self):
-        # Read the timeline directly using the correct adapter name
-        timeline_orig = otio.adapters.read_from_file(SAMPLE_XML, adapter_name='otio_fcpx_xml_lite_adapter')
+    def _perform_roundtrip(self):
+        """Reads slutpop.fcpxml, converts to OTIO, writes back, returns data."""
+        # Read the original timeline
+        logger.info(f"Reading original XML: {SAMPLE_XML}")
+        try:
+            with open(SAMPLE_XML, 'r', encoding='utf-8') as f:
+                original_xml_string = f.read()
+            original_root_et = ET.fromstring(original_xml_string.replace('<!DOCTYPE fcpxml>\n', ''))
+            timeline_orig = otio.adapters.read_from_string(original_xml_string, adapter_name='otio_fcpx_xml_lite_adapter')
+        except Exception as e:
+            self.fail(f"Failed to read or parse original {SAMPLE_XML}: {e}")
 
         self.assertIsNotNone(timeline_orig)
         self.assertIsInstance(timeline_orig, otio.schema.Timeline)
-        self.assertTrue(len(timeline_orig.video_tracks()) > 0, "Original timeline should have video tracks")
-        self.assertTrue(len(timeline_orig.audio_tracks()) > 0, "Original timeline should have audio tracks")
 
-        # --- Test writing the original timeline --- 
-        print(f"\n[INFO] Testing write with original timeline: {timeline_orig.name}")
+        # --- DEBUG: Inspect names of placeholder clips read from original XML --- #
+        logger.debug("Inspecting OTIO Clip names read by reader...")
+        placeholder_clip_names = []
+        for track in timeline_orig.video_tracks():
+            for clip in track:
+                if isinstance(clip, otio.schema.Clip) and \
+                   isinstance(clip.media_reference, otio.schema.GeneratorReference) and \
+                   clip.media_reference.generator_kind == "fcpx_video_placeholder":
+                    placeholder_clip_names.append(clip.name)
+        logger.debug(f"Found placeholder clip names: {placeholder_clip_names[:10]}... (Total: {len(placeholder_clip_names)})")
+        if not placeholder_clip_names or not placeholder_clip_names[0].startswith("Placeholder"):
+             logger.warning("Reader did not seem to produce OTIO Clips with expected 'Placeholder' names!")
+        # --- END DEBUG --- #
 
-        # --- Generate FCPXML string using the adapter --- 
+        # Perform the write operation (roundtrip)
+        logger.info(f"Writing timeline back to FCPXML string...")
         try:
-            fcpxml_string = otio.adapters.write_to_string(timeline_orig, adapter_name='otio_fcpx_xml_lite_adapter')
+            roundtrip_xml_string = otio.adapters.write_to_string(timeline_orig, adapter_name='otio_fcpx_xml_lite_adapter')
+            roundtrip_root_et = ET.fromstring(roundtrip_xml_string.replace('<!DOCTYPE fcpxml>\n', ''))
         except Exception as e:
-            self.fail(f"otio.adapters.write_to_string failed: {e}")
+            self.fail(f"otio.adapters.write_to_string failed during roundtrip: {e}")
 
-        # --- Basic String Assertions --- 
-        self.assertIsNotNone(fcpxml_string)
-        # Version should be preserved from input (1.13 for slutpop.fcpxml)
-        self.assertIn('<fcpxml version="1.13">', fcpxml_string)
-
-        # --- Write output file --- 
+        # Optional: Write output file (can be moved or removed)
         output_dir = os.path.join(os.path.dirname(__file__), "output")
-        output_path = os.path.join(output_dir, "slutpop_roundtrip.fcpxml") # Use original filename
+        output_path = os.path.join(output_dir, "slutpop_roundtrip.fcpxml")
         os.makedirs(output_dir, exist_ok=True)
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(fcpxml_string)
-        print(f"\n[INFO] Wrote original roundtrip FCPXML to: {output_path}")
+            f.write(roundtrip_xml_string)
+        logger.info(f"Wrote roundtrip FCPXML (helper) to: {output_path}")
+
+        return {
+            "original_xml_string": original_xml_string,
+            "roundtrip_xml_string": roundtrip_xml_string,
+            "timeline_orig": timeline_orig,
+            "original_root_et": original_root_et,
+            "roundtrip_root_et": roundtrip_root_et
+        }
+
+    def test_roundtrip_high_level(self):
+        """Tests the basic roundtrip process and high-level comparisons."""
+        # Read the timeline directly using the correct adapter name
+        # timeline_orig = otio.adapters.read_from_file(SAMPLE_XML, adapter_name='otio_fcpx_xml_lite_adapter')
+        data = self._perform_roundtrip()
+        roundtrip_xml_string = data["roundtrip_xml_string"]
+        timeline_orig = data["timeline_orig"]
+        original_root_et = data["original_root_et"]
+        roundtrip_root_et = data["roundtrip_root_et"]
+
+        # self.assertIsNotNone(timeline_orig)
+        # self.assertIsInstance(timeline_orig, otio.schema.Timeline)
+        # self.assertTrue(len(timeline_orig.video_tracks()) > 0, "Original timeline should have video tracks")
+        # self.assertTrue(len(timeline_orig.audio_tracks()) > 0, "Original timeline should have audio tracks")
+
+        # --- Test writing the original timeline --- 
+        # print(f"\n[INFO] Testing write with original timeline: {timeline_orig.name}")
+        logger.info(f"Performing high-level roundtrip assertions for: {timeline_orig.name}")
+
+        # --- Generate FCPXML string using the adapter --- 
+        # try:
+        #     fcpxml_string = otio.adapters.write_to_string(timeline_orig, adapter_name='otio_fcpx_xml_lite_adapter')
+        # except Exception as e:
+        #     self.fail(f"otio.adapters.write_to_string failed: {e}")
+
+
+        # --- Basic String Assertions --- 
+        self.assertIsNotNone(roundtrip_xml_string)
+        # Version should be preserved from input (1.13 for slutpop.fcpxml)
+        self.assertIn('<fcpxml version="1.13">', roundtrip_xml_string)
+
+        # --- Write output file --- 
+        # output_dir = os.path.join(os.path.dirname(__file__), "output")
+        # output_path = os.path.join(output_dir, "slutpop_roundtrip.fcpxml") # Use original filename
+        # os.makedirs(output_dir, exist_ok=True)
+        # with open(output_path, 'w', encoding='utf-8') as f:
+        #     f.write(fcpxml_string)
+        # print(f"\n[INFO] Wrote original roundtrip FCPXML to: {output_path}")
+
+        # --- Compare Counts --- #
+        original_markers = original_root_et.findall('.//marker')
+        roundtrip_markers = roundtrip_root_et.findall('.//marker')
+        self.assertEqual(len(roundtrip_markers), len(original_markers), "Marker count mismatch after roundtrip")
+        logger.info(f"Marker count verified: {len(roundtrip_markers)}")
+
+        rt_container_gap = roundtrip_root_et.find('.//sequence/spine/gap')
+        self.assertIsNotNone(rt_container_gap, "Could not find container gap in roundtrip XML")
+        rt_asset_clips = rt_container_gap.findall('./asset-clip')
+        rt_video_clips = rt_container_gap.findall('./video')
+        self.assertEqual(len(rt_asset_clips), 1, "Roundtrip <asset-clip> count mismatch")
+        self.assertEqual(len(rt_video_clips), 45, f"Roundtrip <video> placeholder count mismatch (expected 45, got {len(rt_video_clips)})")
+        logger.info("Container clip counts verified.")
+
+        logger.info("High-level roundtrip assertions passed.")
+
 
         # --- DETAILED XML REGRESSION TESTS --- 
-        print("[INFO] Parsing output XML for detailed regression assertions...")
-        try:
-            # Remove DOCTYPE before parsing
-            xml_string_no_doctype = fcpxml_string.replace('<!DOCTYPE fcpxml>\n', '')
-            root = ET.fromstring(xml_string_no_doctype)
-        except ET.ParseError as e:
-            self.fail(f"Failed to parse generated FCPXML: {e}\nXML content (first 1k chars):\n{fcpxml_string[:1000]}...")
+        # print("[INFO] Parsing output XML for detailed regression assertions...")
+        # try:
+        #     # Remove DOCTYPE before parsing
+        #     xml_string_no_doctype = fcpxml_string.replace('<!DOCTYPE fcpxml>\n', '')
+        #     root = ET.fromstring(xml_string_no_doctype)
+        # except ET.ParseError as e:
+        #     self.fail(f"Failed to parse generated FCPXML: {e}\nXML content (first 1k chars):\n{fcpxml_string[:1000]}...")
+        # self._perform_roundtrip()
 
-        # 1. Check core structure
+
+    def test_generated_fcpxml_structure(self):
+        """Performs detailed XML structure and attribute validation on the roundtripped FCPXML."""
+        data = self._perform_roundtrip()
+        # Get the necessary data from the helper method's return dictionary
+        roundtrip_xml_string = data["roundtrip_xml_string"]
+        root = data["roundtrip_root_et"] # Use the roundtripped root
+        timeline_orig = data["timeline_orig"] # Get the original timeline for rate info
+
+        # logger.info("High-level roundtrip assertions passed.") # Remove redundant log
+        logger.info("Performing detailed XML structure assertions...")
+
+        # 1. Check core structure (using the correct 'root' variable)
         self.assertEqual(root.tag, 'fcpxml', "Regression check: Root tag")
         resources = root.find('./resources')
         self.assertIsNotNone(resources, "Regression check: Missing resources element")
@@ -88,30 +182,31 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertIsNotNone(container_gap, "Regression check: Missing main container gap")
 
         # --- NEW: Verify nested structure and child counts ---
-        print("[INFO] Verifying nested structure and child counts...")
+        # print("[INFO] Verifying nested structure and child counts...") # Remove print
+        logger.info("Verifying nested structure and child counts...")
         # fcpxml -> library
         self.assertEqual(root.get('version'), '1.13', "Regression check: fcpxml version attribute") # Re-assert
         library_elements = root.findall('./library')
         self.assertEqual(len(library_elements), 1, "Regression check: Expected 1 <library> in <fcpxml>")
-        library = library_elements[0] # Use the found one
+        # library = library_elements[0] # Already defined above
         # No standard required attributes for library other than optional location
 
         # library -> event
         event_elements = library.findall('./event')
         self.assertEqual(len(event_elements), 1, "Regression check: Expected 1 <event> in <library>")
-        event = event_elements[0]
+        # event = event_elements[0] # Already defined above
         self.assertEqual(event.get('name'), 'Untitled Sequence', "Regression check: event name attribute") # Name seems to match project/sequence
 
         # event -> project
         project_elements = event.findall('./project')
         self.assertEqual(len(project_elements), 1, "Regression check: Expected 1 <project> in <event>")
-        project = project_elements[0]
+        # project = project_elements[0] # Already defined above
         self.assertEqual(project.get('name'), 'Untitled Sequence', "Regression check: project name attribute") # From input
 
         # project -> sequence
         sequence_elements = project.findall('./sequence')
         self.assertEqual(len(sequence_elements), 1, "Regression check: Expected 1 <sequence> in <project>")
-        sequence = sequence_elements[0] # Re-assign sequence to the one found here for clarity
+        # sequence = sequence_elements[0] # Already defined above
         # Check sequence attributes (some were checked later, consolidating here)
         self.assertEqual(sequence.get('duration'), '7043/60s', "Regression check: sequence duration attribute")
         self.assertEqual(sequence.get('format'), 'r1', "Regression check: sequence format attribute (expected r1)")
@@ -123,13 +218,13 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         # sequence -> spine
         spine_elements = sequence.findall('./spine')
         self.assertEqual(len(spine_elements), 1, "Regression check: Expected 1 <spine> in <sequence>")
-        spine = spine_elements[0]
+        # spine = spine_elements[0] # Already defined above
         # Spine typically has no attributes
 
         # spine -> gap (container)
         gap_elements = spine.findall('./gap')
         self.assertEqual(len(gap_elements), 1, "Regression check: Expected 1 <gap> in <spine>")
-        container_gap = gap_elements[0] # Re-assign container_gap
+        # container_gap = gap_elements[0] # Already defined above
         self.assertEqual(container_gap.get('name'), 'Timeline Container', "Regression check: container gap name attribute")
         self.assertEqual(container_gap.get('offset'), '0s', "Regression check: container gap offset attribute")
         self.assertEqual(container_gap.get('duration'), '7043/60s', "Regression check: container gap duration attribute")
@@ -139,7 +234,7 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         # gap -> asset-clip (audio)
         asset_clip_elements = container_gap.findall('./asset-clip')
         self.assertEqual(len(asset_clip_elements), 1, "Regression check: Expected 1 <asset-clip> in container <gap>")
-        asset_clip = asset_clip_elements[0]
+        asset_clip = asset_clip_elements[0] # Define asset_clip here
         self.assertEqual(asset_clip.get('name'), 'slutpop.wav', "Regression check: asset-clip name attribute")
         self.assertEqual(asset_clip.get('offset'), '0s', "Regression check: asset-clip offset attribute")
         self.assertEqual(asset_clip.get('duration'), '7043/60s', "Regression check: asset-clip duration attribute")
@@ -156,7 +251,8 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(len(markers_in_asset_clip), expected_markers_in_asset_clip,
                          f"Regression check: Expected {expected_markers_in_asset_clip} <marker> elements in <asset-clip>, found {len(markers_in_asset_clip)}")
         self.assertTrue(len(markers_in_asset_clip) > 0, "Regression check: Path fcpxml/.../asset-clip/marker exists failed - no markers found in asset-clip")
-        print("[INFO] Nested structure and child counts verified.")
+        # print("[INFO] Nested structure and child counts verified.") # Remove print
+        logger.info("Nested structure and child counts verified.")
         # --- End NEW ---
 
         # 2. Check sequence attributes (These are now checked above during path traversal)
@@ -170,7 +266,8 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(seq_format.get('frameDuration'), '1/120s', "Regression check: Sequence format frameDuration") # Still check format details
 
         # --- NEW: Check Resource Element Attributes ---
-        print("[INFO] Verifying resource element attributes...")
+        # print("[INFO] Verifying resource element attributes...") # Remove print
+        logger.info("Verifying resource element attributes...")
 
         # Format (r1)
         fmt1 = resources.find('./format[@id="r1"]') # Find the sequence format
@@ -201,13 +298,14 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(effect3.get('name'), 'Placeholder', "Regression check: Effect r3 name")
         self.assertIn('/Placeholder.motn', effect3.get('uid', ''), "Regression check: Effect r3 UID") # Re-assert
 
-        print("[INFO] Resource element attributes verified.")
+        # print("[INFO] Resource element attributes verified.") # Remove print
+        logger.info("Resource element attributes verified.")
         # --- End NEW ---
 
         # 3. Check clip counts within container gap (Still relevant)
-        asset_clips = container_gap.findall('./asset-clip')
-        video_clips = container_gap.findall('./video')
-        self.assertEqual(len(asset_clips), 1, "Regression check: Expected 1 <asset-clip> in container gap")
+        # asset_clips = container_gap.findall('./asset-clip') # Found earlier
+        video_clips = container_gap.findall('./video') # Define video_clips here
+        self.assertEqual(len(asset_clip_elements), 1, "Regression check: Expected 1 <asset-clip> in container gap") # Use already found asset_clip_elements
         # Expect 9 placeholder segments * 5 lanes = 45
         self.assertEqual(len(video_clips), 45, f"Regression check: Expected 45 <video> placeholders, found {len(video_clips)}")
 
@@ -219,7 +317,7 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(asset_elem.get('hasVideo'), '0', "Regression check: Asset hasVideo")
         # Effect (Placeholder)
         # Assuming the first video clip uses the placeholder effect
-        placeholder_video = video_clips[0]
+        placeholder_video = video_clips[0] # Use video_clips defined above
         effect_ref_id = placeholder_video.get('ref')
         self.assertIsNotNone(effect_ref_id, "Regression check: Placeholder video missing effect ref")
         effect_elem = resources.find(f'./effect[@id="{effect_ref_id}"]')
@@ -245,7 +343,8 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
             self.assertEqual(actual_duration, expected_duration_str,
                              f"Regression check: Marker #{i+1} (value: '{marker_value}') duration mismatch. Expected '{expected_duration_str}', got '{actual_duration}'")
 
-        print("[INFO] Detailed XML regression assertions passed.")
+        # print("[INFO] Detailed XML regression assertions passed.") # Remove print
+        logger.info("Detailed XML regression assertions passed.")
 
 if __name__ == '__main__':
     unittest.main()
