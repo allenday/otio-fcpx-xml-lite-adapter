@@ -331,6 +331,10 @@ class FcpXmlWriter:
         clip_elem_attrs["lane"] = str(lane)
         logger.debug(f"Adding Lane Attr (Container): {lane}")
 
+        # Handle enabled attribute - only add if explicitly disabled
+        if hasattr(item, 'enabled') and item.enabled is False:
+            clip_elem_attrs["enabled"] = "0"
+
         item_elem = ET.Element("asset-clip", **clip_elem_attrs)
 
         if track.kind == otio.schema.TrackKind.Audio:
@@ -365,6 +369,10 @@ class FcpXmlWriter:
         }
         if effect_res_id:
             common_attrs["ref"] = effect_res_id
+
+        # Handle enabled attribute - only add if explicitly disabled
+        if hasattr(item, 'enabled') and item.enabled is False:
+            common_attrs["enabled"] = "0"
 
         if media_ref.generator_kind == "fcpx_title":
             logger.debug(f"Title Attrs: {common_attrs}")

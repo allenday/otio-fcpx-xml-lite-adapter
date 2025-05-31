@@ -196,6 +196,13 @@ class FcpXmlReader:
         clip_source_range = otio.opentime.TimeRange(start_time=clip_media_start_rt, duration=duration_rt)
         otio_clip = otio.schema.Clip(name=name, media_reference=media_ref, source_range=clip_source_range)
 
+        # Handle enabled attribute
+        enabled_attr = element.get('enabled')
+        if enabled_attr is not None:
+            # Set enabled property based on FCPXML attribute ('0' = False, '1' or other = True)
+            otio_clip.enabled = enabled_attr != '0'
+        # If no enabled attribute, keep default (True)
+
         # Add markers
         self._add_markers_to_clip(element, otio_clip, start_frac)
         return otio_clip
@@ -238,6 +245,14 @@ class FcpXmlReader:
         media_ref = otio.schema.GeneratorReference(name=name, generator_kind="fcpx_title", parameters=params)
         clip_source_range = otio.opentime.TimeRange(start_time=otio.opentime.RationalTime(0, self.global_rate), duration=duration_rt)
         otio_item = otio.schema.Clip(name=name, media_reference=media_ref, source_range=clip_source_range)
+        
+        # Handle enabled attribute
+        enabled_attr = element.get('enabled')
+        if enabled_attr is not None:
+            # Set enabled property based on FCPXML attribute ('0' = False, '1' or other = True)
+            otio_item.enabled = enabled_attr != '0'
+        # If no enabled attribute, keep default (True)
+        
         self._add_markers_to_clip(element, otio_item, Fraction(0)) # Titles have 0 start frac
         return otio_item
 
@@ -254,6 +269,14 @@ class FcpXmlReader:
         media_ref = otio.schema.GeneratorReference(name=name, generator_kind="fcpx_video_placeholder", parameters=params)
         clip_source_range = otio.opentime.TimeRange(start_time=otio.opentime.RationalTime(0, self.global_rate), duration=duration_rt)
         otio_item = otio.schema.Clip(name=name, media_reference=media_ref, source_range=clip_source_range)
+        
+        # Handle enabled attribute
+        enabled_attr = element.get('enabled')
+        if enabled_attr is not None:
+            # Set enabled property based on FCPXML attribute ('0' = False, '1' or other = True)
+            otio_item.enabled = enabled_attr != '0'
+        # If no enabled attribute, keep default (True)
+        
         self._add_markers_to_clip(element, otio_item, Fraction(0)) # Placeholders have 0 start frac
         return otio_item
 

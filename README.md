@@ -129,4 +129,67 @@ Contributions are welcome! Please feel free to open issues or submit pull reques
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details. 
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+# Check Video Range Utility
+
+This script checks if a video URL properly supports HTTP Range Requests and 
+attempts to extract basic metadata and determine if the MOOV atom (index)
+is located at the beginning of the file (required for efficient web seeking).
+
+## Requirements
+
+*   Python 3.x
+*   Libraries: `requests`, `hachoir`
+
+Install requirements:
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+```bash
+python check_video_range.py <video_url> [options]
+```
+
+**Arguments:**
+
+*   `video_url`: (Required) The full URL of the video file to check.
+
+**Options:**
+
+*   `-b BYTES`, `--bytes BYTES`: Number of initial bytes to download and analyze. 
+    Defaults to 4194304 (4MB). Choose a value large enough to likely contain
+    the MOOV atom if it's at the start, but small enough for a quick check.
+*   `-t TIMEOUT`, `--timeout TIMEOUT`: Request timeout in seconds.
+    Defaults to 15 seconds.
+*   `-h`, `--help`: Show help message.
+
+## Example
+
+```bash
+# Check a file, fetching the first 2MB
+python check_video_range.py "https://example.com/my_video.mp4" --bytes 2097152
+
+# Check a file with default settings (4MB)
+python check_video_range.py "https://storage.pmvhaven.com/path/to/video.mp4"
+```
+
+## Interpreting Output
+
+1.  **Range Request Analysis:**
+    *   `HONORED`: The server responded with `206 Partial Content` and correct `Content-Range`/`Content-Length` headers. This is **good**. 
+    *   `NOT HONORED`: The server responded with `200 OK` (sending the whole file) or the `206` headers were incorrect/missing. This indicates a problem with the server configuration or the specific file handling for range requests. Seeking will likely **fail** or be inefficient.
+    *   `FAILED`: A network error or timeout occurred.
+
+2.  **Metadata & MOOV Atom Analysis:**
+    *   Shows basic metadata extracted by Hachoir (if parsing is successful).
+    *   Reports if `ftyp` (file type) and `moov` (movie metadata/index) atom signatures were found within the downloaded chunk.
+
+3.  **MOOV Atom Summary:**
+    *   `LIKELY AT START`: Found `moov` signature near the beginning. The file is **likely optimized** for web streaming/seeking.
+    *   `LIKELY AT END or MISSING`: Did not find `moov` signature in the initial chunk. The file **likely needs optimization** (e.g., using `ffmpeg -movflags +faststart`) for efficient web seeking.
+    *   `Unknown`: Could not determine due to errors or missing data.
+
+**Note:** Finding the `moov` signature is a strong indicator, but not absolute proof without fully parsing the file structure. However, its absence in the first few MB is a very common reason for seeking failures. 
