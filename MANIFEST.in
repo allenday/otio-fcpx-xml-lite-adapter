@@ -1,0 +1,9 @@
+# Include the OTIO plugin manifest file
+include otio_fcpx_xml_lite_adapter/plugin_manifest.json
+
+# Include test data files
+recursive-include tests/data *.fcpxml *.json
+
+# Include documentation
+include README.md
+include LICENSE 
