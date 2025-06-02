@@ -168,7 +168,7 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(root.tag, 'fcpxml', "Regression check: Root tag")
         project = root.find('./project')
         self.assertIsNotNone(project, "Regression check: Missing project element")
-        resources = project.find('./resources')
+        resources = root.find('./resources')  # Resources is at fcpxml root level, not under project
         self.assertIsNotNone(resources, "Regression check: Missing resources element")
         sequence = project.find('./sequence')
         self.assertIsNotNone(sequence, "Regression check: Missing sequence element")
@@ -185,9 +185,9 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         project_elements = root.findall('./project')
         self.assertEqual(len(project_elements), 1, "Regression check: Expected 1 <project> in <fcpxml>")
 
-        # project -> resources  
-        resources_elements = project.findall('./resources')
-        self.assertEqual(len(resources_elements), 1, "Regression check: Expected 1 <resources> in <project>")
+        # fcpxml -> resources (not project -> resources)
+        resources_elements = root.findall('./resources')
+        self.assertEqual(len(resources_elements), 1, "Regression check: Expected 1 <resources> in <fcpxml>")
         
         # project -> sequence
         sequence_elements = project.findall('./sequence')
@@ -227,7 +227,7 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(asset_clip.get('start'), '0s', "Regression check: asset-clip start attribute")
         # self.assertEqual(asset_clip.get('format'), 'r2', "Regression check: asset-clip format attribute (expected r2)") # Asset-clips don't have format, they ref assets which have format.
         # self.assertEqual(asset_clip.get('tcFormat'), 'NDF', "Regression check: asset-clip tcFormat attribute") # tcFormat is usually on sequence or format resource
-        self.assertEqual(asset_clip.get('role'), 'dialogue', "Regression check: asset-clip role attribute")
+        self.assertEqual(asset_clip.get('audioRole'), 'dialogue', "Regression check: asset-clip audioRole attribute")  # Changed from 'role' to 'audioRole'
         self.assertEqual(asset_clip.get('ref'), 'r2', "Regression check: asset-clip ref attribute (expected r2)")
 
 
@@ -267,9 +267,11 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         asset2 = resources.find('./asset[@id="r2"]') # Find the audio asset
         self.assertIsNotNone(asset2, "Regression check: Asset r2 not found in resources")
         self.assertEqual(asset2.get('name'), 'slutpop.wav', "Regression check: Asset r2 name")
-        # Source path can be absolute, just check the end
-        asset_src = asset2.get('src', '')
-        # self.assertTrue(asset_src.endswith('/slutpop.wav'), f"Regression check: Asset r2 src does not end with /slutpop.wav (got: {asset_src})") # Remove check - src seems missing in current output
+        # Asset uses media-rep children, not src attribute directly
+        media_rep = asset2.find('media-rep')
+        self.assertIsNotNone(media_rep, "Regression check: Asset r2 missing media-rep")
+        asset_src = media_rep.get('src', '')
+        self.assertTrue(asset_src.endswith('/slutpop.wav'), f"Regression check: Asset r2 src does not end with /slutpop.wav (got: {asset_src})")
         self.assertEqual(asset2.get('start'), '0s', "Regression check: Asset r2 start")
         self.assertEqual(asset2.get('duration'), '939/8s', "Regression check: Asset r2 duration")
         self.assertEqual(asset2.get('hasAudio'), '1', "Regression check: Asset r2 hasAudio")

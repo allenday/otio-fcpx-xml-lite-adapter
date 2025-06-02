@@ -3,7 +3,7 @@
 
 [project]
 name = "otio-fcpx-xml-lite-adapter"
-version = "0.2.0"
+version = "0.2.2"
 description = "OpenTimelineIO FCP X XML Lite Adapter"
 authors = [
   { name="Allen Day", email="allenday@allenday.com" },

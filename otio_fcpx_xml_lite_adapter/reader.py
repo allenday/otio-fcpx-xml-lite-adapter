@@ -29,15 +29,15 @@ class FcpXmlReader:
         logger.info(f"Parsing FCPXML version: {self.fcpxml_version}")
 
         # Handle both old and new FCPXML structures
-        # New DTD-compliant structure: fcpxml > project > (resources, sequence)
+        # Current DTD structure: fcpxml > (resources?, project)
         # Old structure: fcpxml > (resources, library > event > project > sequence)
         
         self.project_root = self.root.find('project')
         if self.project_root is not None:
-            # New DTD-compliant structure
-            self.resources_root = self.project_root.find('resources')
+            # Current DTD-compliant structure: resources at fcpxml root level
+            self.resources_root = self.root.find('resources')
             self.sequence_element = self.project_root.find('sequence')
-            logger.info("Using new DTD-compliant structure (fcpxml > project)")
+            logger.info("Using current DTD-compliant structure (fcpxml > resources, project)")
         else:
             # Old structure
             self.resources_root = self.root.find('resources')
@@ -190,12 +190,12 @@ class FcpXmlReader:
 
         if ref_id and ref_id in self.assets:
             asset = self.assets[ref_id]
-            # Handle both old and new asset structures
-            # New DTD structure: src attribute directly on asset
-            # Old structure: nested media-rep element with src
-            media_url = asset.get('src')  # Try new structure first
+            # Handle both current DTD structure and legacy formats
+            # Current DTD structure: <asset><media-rep src="..."/></asset>
+            # Legacy structure: <asset src="...">
+            media_url = asset.get('src')  # Try legacy structure first
             if not media_url:
-                # Fall back to old structure
+                # Fall back to current DTD structure
                 media_rep = asset.find('./media-rep')
                 media_url = media_rep.get('src') if media_rep is not None else None
             

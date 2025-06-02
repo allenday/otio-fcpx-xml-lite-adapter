@@ -306,7 +306,7 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(root.tag, 'fcpxml', "XML Root tag mismatch")
         project = root.find('./project')
         self.assertIsNotNone(project, "Missing <project> element")
-        resources = project.find('./resources')
+        resources = root.find('resources')
         self.assertIsNotNone(resources, "Missing <resources> element")
         sequence = project.find('./sequence')
         self.assertIsNotNone(sequence, "Missing <sequence> element")
@@ -345,7 +345,9 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertIsNotNone(asset_elem, "Asset resource r2 not found")
         self.assertEqual(asset_elem.get('name'), expected_asset_name, "Asset name mismatch")
         # DTD now uses src attribute directly, not media-rep
-        self.assertEqual(asset_elem.get('src'), media_url, "Asset src mismatch")
+        media_rep = asset_elem.find('media-rep')
+        self.assertIsNotNone(media_rep)
+        self.assertEqual(media_rep.get('src'), media_url, "Asset src mismatch")
         self.assertEqual(asset_elem.get('hasAudio'), '1', "Asset hasAudio mismatch")
         self.assertEqual(asset_elem.get('hasVideo'), '0', "Asset hasVideo mismatch")
 
@@ -361,7 +363,7 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertIsNotNone(audio_clip_elem, "Audio asset-clip (lane -1) not found in container gap")
         self.assertEqual(audio_clip_elem.get('name'), "Audio Clip", "Audio clip name mismatch")
         self.assertEqual(audio_clip_elem.get('ref'), 'r2', "Audio clip ref mismatch")
-        self.assertEqual(audio_clip_elem.get('role'), 'dialogue', "Audio clip role mismatch")  # Changed from audioRole
+        self.assertEqual(audio_clip_elem.get('audioRole'), 'dialogue', "Audio clip audioRole mismatch")  # Changed from role to audioRole
 
         video_clips_lane1 = container_gap.findall(f'./video[@lane="1"][@ref="{placeholder_resource_id}"]')
         self.assertTrue(len(video_clips_lane1) > 0, "No placeholder video clips found on lane 1 in container gap")
@@ -453,7 +455,7 @@ class WriterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         # Find resources section
         project = root.find('project')
         self.assertIsNotNone(project)
-        resources = project.find('resources')
+        resources = root.find('resources')  # Resources is at fcpxml root level, not under project
         self.assertIsNotNone(resources)
         
         # Find format element
@@ -464,7 +466,10 @@ class WriterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         # Find asset element
         asset_elem = resources.find('asset')
         self.assertIsNotNone(asset_elem)
-        self.assertEqual(asset_elem.get('src'), 'file:///path/to/video.mov')
+        # Asset uses media-rep children, not src attribute directly
+        media_rep = asset_elem.find('media-rep')
+        self.assertIsNotNone(media_rep)
+        self.assertEqual(media_rep.get('src'), 'file:///path/to/video.mov')
         
         # Find sequence
         sequence = project.find('sequence')

@@ -28,14 +28,16 @@ class FcpXmlWriter:
         self.timeline = input_otio
         logger.info("Initializing FcpXmlWriter")
 
-        # Basic structure setup - following DTD: fcpxml > project > (resources, sequence)
+        # Basic structure setup - following DTD: fcpxml > (resources?, project)
+        # Per DTD: <!ELEMENT fcpxml (import-options?, resources?, (library | event* | (%event_item;)*))>
+        # Per DTD: <!ELEMENT project (sequence)>
         self.version = self.timeline.metadata.get('fcpx_version', '1.13') # Use stored version or default
         self.root = ET.Element("fcpxml", version="1.13")
         
-        # DTD structure: project contains resources and sequence
+        # DTD structure: resources at fcpxml level, project contains only sequence
+        self.resources = ET.SubElement(self.root, "resources")
         project_name = self.timeline.name or "OTIO Project"
         self.project = ET.SubElement(self.root, "project", name=project_name)
-        self.resources = ET.SubElement(self.project, "resources")
 
         # Resource Management State
         self.resource_map_assets = {}
@@ -212,11 +214,10 @@ class FcpXmlWriter:
         has_audio = "1" if track_kind == otio.schema.TrackKind.Audio else "0" # FAKE
         has_video = "1" if track_kind == otio.schema.TrackKind.Video else "0" # FAKE
         
-        # DTD requires src attribute directly on asset, not nested media-rep
+        # DTD requires media-rep+ children, not src attribute
         asset = ET.Element("asset", 
                           id=asset_id, 
                           name=os.path.basename(url_key) or f"Asset_{asset_id}",
-                          src=url_key,  # DTD: src is required attribute on asset
                           start=asset_start_str, 
                           duration=asset_duration_str,
                           hasAudio=has_audio, 
@@ -224,7 +225,9 @@ class FcpXmlWriter:
                           audioRate="48k", 
                           audioChannels="2") # Defaults
         
-        # Removed media-rep creation - not valid per DTD
+        # DTD: <!ELEMENT asset (media-rep+, metadata?)>
+        media_rep = ET.SubElement(asset, "media-rep", kind="original-media", src=url_key)
+        
         self.asset_elements[asset_id] = asset
         logger.debug(f"[Created minimal asset resource: {asset_id} (Needs context improvement)")
 
@@ -319,18 +322,21 @@ class FcpXmlWriter:
             asset_start_str = _fcpx_time_str(asset_start_rt)
             has_audio = "1" if track.kind == otio.schema.TrackKind.Audio else "0"
             has_video = "1" if track.kind == otio.schema.TrackKind.Video else "0"
-            # DTD requires src attribute directly on asset, not nested media-rep
+            
+            # DTD requires media-rep+ children, not src attribute
             asset = ET.Element("asset", 
                               id=asset_id, 
                               name=os.path.basename(url_key) or f"Asset_{asset_id}",
-                              src=url_key,  # DTD: src is required attribute on asset
                               start=asset_start_str, 
                               duration=asset_duration_str,
                               hasAudio=has_audio, 
                               hasVideo=has_video,
                               audioRate="48k", 
                               audioChannels="2") # Defaults
-            # Removed media-rep creation - not valid per DTD
+            
+            # DTD: <!ELEMENT asset (media-rep+, metadata?)>
+            media_rep = ET.SubElement(asset, "media-rep", kind="original-media", src=url_key)
+            
             self.asset_elements[asset_id] = asset
             logger.debug(f"Created asset resource: {asset_id}")
 
@@ -356,7 +362,7 @@ class FcpXmlWriter:
         item_elem = ET.Element("asset-clip", **clip_elem_attrs)
 
         if track.kind == otio.schema.TrackKind.Audio:
-            item_elem.set("role", "dialogue")  # DTD specifies "role", not "audioRole"
+            item_elem.set("audioRole", "dialogue")  # DTD specifies "audioRole" for audio clips
 
         self._add_markers_to_element(item_elem, item)
         return item_elem
