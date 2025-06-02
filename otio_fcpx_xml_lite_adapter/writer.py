@@ -106,7 +106,9 @@ class FcpXmlWriter:
         frame_dur_frac = Fraction(rate_den, rate_num).limit_denominator()
         frame_dur_str = f"{frame_dur_frac.numerator}/{frame_dur_frac.denominator}s" if frame_dur_frac.denominator != 1 else f"{frame_dur_frac.numerator}s"
         # DTD only allows: id, name, frameDuration, fieldOrder, width, height, paspH, paspV
-        fmt = ET.Element("format", id=fmt_id, name=f"FFVideoFormat_OTIO_{int(rate_key)}",
+        # Ensure rate_key is properly converted to an integer for the name
+        rate_int = int(float(rate_key)) if rate_key else 25  # Default to 25fps if rate_key is invalid
+        fmt = ET.Element("format", id=fmt_id, name=f"FFVideoFormat_OTIO_{rate_int}",
                              frameDuration=frame_dur_str, width="1920", height="1080") # TODO: Get resolution?
         self.format_elements[fmt_id] = fmt
 
@@ -316,8 +318,18 @@ class FcpXmlWriter:
 
         # Define nested asset creation function to capture context
         def _create_asset_with_context(asset_id, url_key):
-            asset_duration_rt = media_ref.available_range.duration if media_ref.available_range else item_duration
-            asset_start_rt = media_ref.available_range.start_time if media_ref.available_range else otio.opentime.RationalTime(0, item_duration.rate)
+            # Safely handle available_range and item_duration
+            if media_ref and media_ref.available_range and media_ref.available_range.duration:
+                asset_duration_rt = media_ref.available_range.duration
+                asset_start_rt = media_ref.available_range.start_time
+            elif item_duration:
+                asset_duration_rt = item_duration
+                asset_start_rt = otio.opentime.RationalTime(0, item_duration.rate)
+            else:
+                # Fallback to timeline duration if both are None
+                asset_duration_rt = self.timeline_duration
+                asset_start_rt = otio.opentime.RationalTime(0, self.global_rate)
+                
             asset_duration_str = _fcpx_time_str(asset_duration_rt)
             asset_start_str = _fcpx_time_str(asset_start_rt)
             has_audio = "1" if track.kind == otio.schema.TrackKind.Audio else "0"

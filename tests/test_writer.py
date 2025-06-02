@@ -626,6 +626,442 @@ class WriterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         # Validate against DTD
         self._validate_xml_against_dtd(xml_content)
 
+    def test_external_reference_without_available_range(self):
+        """Test ExternalReference clips without available_range don't crash (regression test)"""
+        timeline = otio.schema.Timeline(name="External Ref Test")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        # Add video track
+        video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Add clip with ExternalReference but NO available_range (triggers the bug)
+        clip_ref = otio.schema.ExternalReference(target_url="file:///path/to/video.mov")
+        # Explicitly ensure available_range is None
+        clip_ref.available_range = None
+        
+        clip = otio.schema.Clip(
+            name="Clip Without Available Range",
+            media_reference=clip_ref,
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 25),
+                duration=otio.opentime.RationalTime(100, 25)
+            )
+        )
+        video_track.append(clip)
+        
+        # This should NOT crash with 'NoneType' object has no attribute 'duration'
+        try:
+            writer = FcpXmlWriter(timeline)
+            xml_content = writer.build_xml_string()
+            
+            # Verify structure
+            root = ET.fromstring(xml_content)
+            asset_elem = root.find('.//asset')
+            self.assertIsNotNone(asset_elem)
+            self.assertIsNotNone(asset_elem.get('duration'))
+            self.assertIsNotNone(asset_elem.get('name'))
+            
+            # Validate against DTD
+            self._validate_xml_against_dtd(xml_content)
+            
+        except AttributeError as e:
+            if "'NoneType' object has no attribute 'duration'" in str(e):
+                self.fail("Regression: NoneType duration error when processing ExternalReference without available_range")
+            else:
+                raise
+
+    def test_complex_timeline_multiple_media_references(self):
+        """Test complex timeline with multiple external references (regression test)"""
+        timeline = otio.schema.Timeline(name="Complex Media Timeline")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        # Add video track
+        video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Add multiple clips with different ExternalReference configurations
+        test_clips = [
+            # Clip with no available_range
+            {
+                "name": "Clip No Available Range",
+                "url": "file:///path/to/video1.mov", 
+                "available_range": None
+            },
+            # Clip with available_range but no duration
+            {
+                "name": "Clip Invalid Available Range",
+                "url": "file:///path/to/video2.mov",
+                "available_range": otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, 25),
+                    duration=otio.opentime.RationalTime(0, 25)  # Zero duration
+                )
+            },
+            # Clip with valid available_range
+            {
+                "name": "Clip Valid Available Range", 
+                "url": "file:///path/to/video3.mov",
+                "available_range": otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, 25),
+                    duration=otio.opentime.RationalTime(200, 25)
+                )
+            }
+        ]
+        
+        for clip_data in test_clips:
+            clip_ref = otio.schema.ExternalReference(
+                target_url=clip_data["url"],
+                available_range=clip_data["available_range"]
+            )
+            
+            clip = otio.schema.Clip(
+                name=clip_data["name"],
+                media_reference=clip_ref,
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, 25),
+                    duration=otio.opentime.RationalTime(50, 25)
+                )
+            )
+            video_track.append(clip)
+        
+        # This should handle all cases gracefully
+        try:
+            writer = FcpXmlWriter(timeline)
+            xml_content = writer.build_xml_string()
+            
+            # Verify all assets were created
+            root = ET.fromstring(xml_content)
+            asset_elems = root.findall('.//asset')
+            self.assertEqual(len(asset_elems), 3, "Should create 3 asset resources")
+            
+            for asset_elem in asset_elems:
+                self.assertIsNotNone(asset_elem.get('duration'))
+                self.assertIsNotNone(asset_elem.get('name'))
+                self.assertNotEqual(asset_elem.get('name'), "", "Asset name should not be empty")
+            
+            # Validate against DTD
+            self._validate_xml_against_dtd(xml_content)
+            
+        except (AttributeError, TypeError) as e:
+            if "NoneType" in str(e) or "duration" in str(e):
+                self.fail(f"Regression: Media reference handling error: {e}")
+            else:
+                raise
+
+    def test_format_name_not_empty(self):
+        """Test that format name is never empty (regression test)"""
+        # Test various frame rates that might cause empty name issues
+        test_rates = [24, 25, 30, 23.976, 29.97, 50, 60]
+        
+        for rate in test_rates:
+            with self.subTest(rate=rate):
+                timeline = otio.schema.Timeline(name=f"Timeline {rate}fps")
+                timeline.global_start_time = otio.opentime.RationalTime(0, rate)
+                
+                # Add simple video track
+                video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+                timeline.tracks.append(video_track)
+                
+                writer = FcpXmlWriter(timeline)
+                xml_content = writer.build_xml_string()
+                
+                # Check format name is not empty
+                root = ET.fromstring(xml_content)
+                format_elem = root.find('.//format')
+                self.assertIsNotNone(format_elem)
+                
+                format_name = format_elem.get('name')
+                self.assertIsNotNone(format_name, f"Format name should not be None for rate {rate}")
+                self.assertNotEqual(format_name, "", f"Format name should not be empty for rate {rate}")
+                self.assertTrue(format_name.startswith("FFVideoFormat_OTIO_"), 
+                              f"Format name should have correct prefix for rate {rate}")
+
+    def test_edge_case_frame_rates(self):
+        """Test edge case frame rates that might cause conversion issues"""
+        # Edge cases that might break int() conversion
+        edge_cases = [
+            0.1,    # Very low rate
+            1000,   # Very high rate  
+            23.976, # Common fractional rate
+            29.97,  # Common fractional rate
+            59.94,  # Common fractional rate
+        ]
+        
+        for rate in edge_cases:
+            with self.subTest(rate=rate):
+                timeline = otio.schema.Timeline(name=f"Edge Case {rate}")
+                timeline.global_start_time = otio.opentime.RationalTime(0, rate)
+                
+                try:
+                    writer = FcpXmlWriter(timeline)
+                    xml_content = writer.build_xml_string()
+                    
+                    # Should not crash and should produce valid format name
+                    root = ET.fromstring(xml_content)
+                    format_elem = root.find('.//format')
+                    self.assertIsNotNone(format_elem)
+                    
+                    format_name = format_elem.get('name')
+                    self.assertIsNotNone(format_name)
+                    self.assertNotEqual(format_name, "")
+                    
+                except Exception as e:
+                    self.fail(f"Edge case rate {rate} caused exception: {e}")
+
+    def test_media_reference_duration_fallbacks(self):
+        """Test various media reference scenarios and duration fallbacks"""
+        timeline = otio.schema.Timeline(name="Duration Fallback Test")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Test case 1: ExternalReference with None available_range
+        clip_ref_1 = otio.schema.ExternalReference(target_url="file:///test1.mov")
+        clip_ref_1.available_range = None
+        
+        clip_1 = otio.schema.Clip(
+            name="Clip None Available Range",
+            media_reference=clip_ref_1,
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 25),
+                duration=otio.opentime.RationalTime(100, 25)
+            )
+        )
+        video_track.append(clip_1)
+        
+        # Test case 2: ExternalReference with available_range but None duration
+        broken_range = otio.opentime.TimeRange(
+            start_time=otio.opentime.RationalTime(0, 25),
+            duration=None  # This might cause issues
+        )
+        clip_ref_2 = otio.schema.ExternalReference(
+            target_url="file:///test2.mov",
+            available_range=broken_range
+        )
+        
+        clip_2 = otio.schema.Clip(
+            name="Clip Broken Range",
+            media_reference=clip_ref_2,
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 25), 
+                duration=otio.opentime.RationalTime(100, 25)
+            )
+        )
+        video_track.append(clip_2)
+        
+        # Should handle all cases gracefully without crashing
+        try:
+            writer = FcpXmlWriter(timeline)
+            xml_content = writer.build_xml_string()
+            
+            # Verify assets were created with valid durations
+            root = ET.fromstring(xml_content)
+            asset_elems = root.findall('.//asset')
+            
+            for asset_elem in asset_elems:
+                duration_str = asset_elem.get('duration')
+                self.assertIsNotNone(duration_str)
+                self.assertNotEqual(duration_str, "")
+                # Should be valid FCPXML time format
+                self.assertRegex(duration_str, r'^\d+(/\d+)?s$')
+                
+        except Exception as e:
+            self.fail(f"Duration fallback handling failed: {e}")
+
+    def test_clips_with_metadata_dont_crash(self):
+        """Test that clips with metadata fields don't cause crashes (regression test)"""
+        timeline = otio.schema.Timeline(name="Metadata Test")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        # Add video track
+        video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Create clip with various metadata that might cause issues
+        clip_ref = otio.schema.ExternalReference(target_url="file:///path/to/video.mov")
+        clip = otio.schema.Clip(
+            name="Clip With Metadata",
+            media_reference=clip_ref,
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 25),
+                duration=otio.opentime.RationalTime(100, 25)
+            )
+        )
+        
+        # Add various metadata that might cause issues
+        clip.metadata.update({
+            "custom_field": "test_value",
+            "frame_rate": 25.0,
+            "resolution": {"width": 1920, "height": 1080},
+            "timecode": "01:00:00:00",
+            "color_space": "Rec.709",
+            "nested_data": {
+                "sub_field": "sub_value",
+                "numbers": [1, 2, 3]
+            },
+            "unicode_text": "Test with unicode: éñçødéd",
+            "special_chars": "Test!@#$%^&*()_+-={}[]|\\:;\"'<>?,./",
+            "null_value": None,
+            "empty_string": "",
+            "large_number": 999999999999,
+            "float_precision": 23.976023976
+        })
+        
+        video_track.append(clip)
+        
+        # Should handle metadata gracefully without crashing
+        try:
+            writer = FcpXmlWriter(timeline)
+            xml_content = writer.build_xml_string()
+            
+            # Verify basic structure
+            root = ET.fromstring(xml_content)
+            asset_clip = root.find('.//asset-clip')
+            self.assertIsNotNone(asset_clip)
+            self.assertEqual(asset_clip.get('name'), "Clip With Metadata")
+            
+            # Validate against DTD
+            self._validate_xml_against_dtd(xml_content)
+            
+        except Exception as e:
+            self.fail(f"Metadata handling regression: Clips with metadata caused crash: {e}")
+
+    def test_clips_with_problematic_metadata_fields(self):
+        """Test clips with metadata fields that might conflict with XML attributes"""
+        timeline = otio.schema.Timeline(name="Problematic Metadata Test")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Test different clips with potentially problematic metadata
+        problematic_metadata_sets = [
+            # Metadata that conflicts with XML attribute names
+            {
+                "name": "conflicting_name",
+                "id": "conflicting_id", 
+                "duration": "conflicting_duration",
+                "ref": "conflicting_ref",
+                "offset": "conflicting_offset"
+            },
+            # Metadata with XML-unsafe characters
+            {
+                "xml_unsafe": "<>&\"'",
+                "ampersand": "Rock & Roll",
+                "quotes": 'Test "quoted" text',
+                "brackets": "[test] {data} (info)"
+            },
+            # Metadata with FCPXML-specific field names
+            {
+                "frameDuration": "1/30s",
+                "tcFormat": "NDF", 
+                "audioRole": "music",
+                "format": "custom_format",
+                "lane": "custom_lane"
+            }
+        ]
+        
+        for i, metadata in enumerate(problematic_metadata_sets):
+            clip_ref = otio.schema.ExternalReference(target_url=f"file:///test{i}.mov")
+            clip = otio.schema.Clip(
+                name=f"Problematic Clip {i}",
+                media_reference=clip_ref,
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, 25),
+                    duration=otio.opentime.RationalTime(50, 25)
+                )
+            )
+            clip.metadata.update(metadata)
+            video_track.append(clip)
+        
+        # Should handle all problematic metadata without crashing
+        try:
+            writer = FcpXmlWriter(timeline)
+            xml_content = writer.build_xml_string()
+            
+            # Verify all clips were processed
+            root = ET.fromstring(xml_content)
+            asset_clips = root.findall('.//asset-clip')
+            self.assertEqual(len(asset_clips), 3, "Should process all clips with problematic metadata")
+            
+            # Validate against DTD
+            self._validate_xml_against_dtd(xml_content)
+            
+        except Exception as e:
+            self.fail(f"Metadata regression: Problematic metadata fields caused crash: {e}")
+
+    def test_convert_shots_script_scenario(self):
+        """Test the exact scenario from convert_shots_json_to_otio.py script (regression test)"""
+        timeline = otio.schema.Timeline(name="Shots from music-video")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        video_track = otio.schema.Track(name="Video", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Simulate what convert_shots_json_to_otio.py creates
+        video_path_abs = "/absolute/path/to/video.mp4"
+        
+        # Create ExternalReference WITHOUT available_range (like the script does)
+        media_ref = otio.schema.ExternalReference(
+            target_url=f"file://{video_path_abs}"
+        )
+        # Explicitly ensure available_range is None (like the script)
+        assert media_ref.available_range is None
+        
+        # Create clip with the exact metadata the script adds
+        clip = otio.schema.Clip(
+            name="Shot 1",
+            media_reference=media_ref,
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(value=0, rate=25),
+                duration=otio.opentime.RationalTime(value=75, rate=25)  # 3 seconds
+            )
+        )
+        
+        # Add the exact metadata structure from convert_shots_json_to_otio.py
+        clip.metadata.update({
+            'shot_id': 1,
+            'original_start_time': 0.0,
+            'original_duration': 3.0,  # This could interfere with duration calculations
+            'timeline_start_frame': 0,
+            'timeline_duration_frames': 75,  # This could interfere with frame calculations
+            'probability': 0.95,
+            'shot_type': 'detected',
+            'start_frame': 0,  # This could interfere with start frame calculations
+            'end_frame': 74    # This could interfere with end frame calculations
+        })
+        
+        video_track.append(clip)
+        
+        # This should NOT crash with 'NoneType' object has no attribute 'duration'
+        try:
+            writer = FcpXmlWriter(timeline)
+            xml_content = writer.build_xml_string()
+            
+            # Verify the clip was processed successfully
+            root = ET.fromstring(xml_content)
+            asset_clip = root.find('.//asset-clip')
+            self.assertIsNotNone(asset_clip)
+            self.assertEqual(asset_clip.get('name'), "Shot 1")
+            
+            # Verify asset was created with valid duration
+            asset_elem = root.find('.//asset')
+            self.assertIsNotNone(asset_elem)
+            self.assertIsNotNone(asset_elem.get('duration'))
+            self.assertNotEqual(asset_elem.get('duration'), "")
+            
+            # Validate against DTD
+            self._validate_xml_against_dtd(xml_content)
+            
+        except AttributeError as e:
+            if "'NoneType' object has no attribute 'duration'" in str(e):
+                self.fail("EXACT REGRESSION: convert_shots_json_to_otio.py script scenario fails with NoneType duration error")
+            else:
+                raise
+        except Exception as e:
+            self.fail(f"convert_shots_json_to_otio.py script scenario caused unexpected error: {e}")
+
 
 if __name__ == '__main__':
     unittest.main()
