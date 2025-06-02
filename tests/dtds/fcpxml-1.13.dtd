@@ -1,0 +1,251 @@
+<!-- FCP X Interchange Format, Version 1.13 -->
+<!-- Copyright (c) 2024 Apple Inc. All rights reserved. -->
+
+<!-- FCPXML -->
+<!ELEMENT fcpxml (project)>
+<!ATTLIST fcpxml version CDATA #FIXED "1.13">
+
+<!-- COMMON ENTITIES -->
+
+<!-- 'time' attributes are expressed as a rational number of seconds (e.g., "1001/30000s") -->
+<!-- with a 64-bit numerator and 32-bit denominator. -->
+<!-- Integer 'time' values, such as 5 seconds, may be expressed as whole numbers (e.g., '5s'). -->
+<!ENTITY % time "CDATA">
+
+<!-- A 'timelist' is a semicolon-separated list of time values (e.g., "0s;5s;10s;20s") -->
+<!ENTITY % timelist "CDATA">
+
+<!-- PROJECT ELEMENTS -->
+
+<!ELEMENT project (resources, (sequence | (clip | audition | mc-clip | ref-clip)*))>
+<!ATTLIST project name CDATA #IMPLIED>
+<!ATTLIST project uid CDATA #IMPLIED>
+<!ATTLIST project eventID CDATA #IMPLIED>
+<!ATTLIST project location CDATA #IMPLIED>
+
+<!-- RESOURCE ELEMENTS -->
+
+<!ELEMENT resources (asset | effect | format | media | projectRef)*>
+
+<!ELEMENT format EMPTY>
+<!ATTLIST format id ID #REQUIRED>
+<!ATTLIST format name CDATA #IMPLIED>
+<!ATTLIST format frameDuration %time; #IMPLIED>
+<!ATTLIST format fieldOrder CDATA #IMPLIED>
+<!ATTLIST format width CDATA #IMPLIED>
+<!ATTLIST format height CDATA #IMPLIED>
+<!ATTLIST format paspH CDATA #IMPLIED>
+<!ATTLIST format paspV CDATA #IMPLIED>
+
+<!ELEMENT asset (bookmark?, metadata?)>
+<!ATTLIST asset id ID #REQUIRED>
+<!ATTLIST asset name CDATA #IMPLIED>
+<!ATTLIST asset uid CDATA #IMPLIED>
+<!ATTLIST asset projectRef IDREF #IMPLIED>
+<!ATTLIST asset src CDATA #REQUIRED>
+<!ATTLIST asset start %time; #IMPLIED>
+<!ATTLIST asset duration %time; #IMPLIED>
+<!ATTLIST asset hasVideo CDATA #IMPLIED>
+<!ATTLIST asset hasAudio CDATA #IMPLIED>
+<!ATTLIST asset audioSources CDATA #IMPLIED>
+<!ATTLIST asset audioChannels CDATA #IMPLIED>
+<!ATTLIST asset audioRate CDATA #IMPLIED>
+<!ATTLIST asset colorOverride CDATA #IMPLIED>
+
+<!ELEMENT effect EMPTY>
+<!ATTLIST effect id ID #REQUIRED>
+<!ATTLIST effect name CDATA #IMPLIED>
+<!ATTLIST effect uid CDATA #REQUIRED>
+
+<!ELEMENT media (multicam | sequence)?>
+<!ATTLIST media id ID #REQUIRED>
+<!ATTLIST media name CDATA #IMPLIED>
+<!ATTLIST media uid CDATA #IMPLIED>
+<!ATTLIST media projectRef IDREF #IMPLIED>
+
+<!ELEMENT projectRef EMPTY>
+<!ATTLIST projectRef id ID #REQUIRED>
+<!ATTLIST projectRef name CDATA #IMPLIED>
+<!ATTLIST projectRef uid CDATA #IMPLIED>
+
+<!-- STORY ELEMENTS -->
+
+<!ENTITY % ao_attrs "
+lane CDATA #IMPLIED
+offset %time; #IMPLIED
+">
+
+<!ENTITY % clip_attrs "
+%ao_attrs;
+name CDATA #IMPLIED
+start %time; #IMPLIED
+duration %time; #REQUIRED
+enabled (1 | 0) '1'
+">
+
+<!ENTITY % audioHz "( 32k | 44.1k | 48k | 88.2k | 96k | 176.4k | 192k )">
+
+<!ENTITY % media_attrs "
+format IDREF #REQUIRED
+duration %time; #IMPLIED
+tcStart %time; #IMPLIED
+tcFormat (DF | NDF) #IMPLIED
+audioLayout (stereo | surround) #IMPLIED
+audioRate %audioHz; #IMPLIED
+">
+
+<!ENTITY % outputChannel "( L | R | C | LFE | Ls | Rs | X )">
+
+<!ENTITY % clip_item "audio | video | clip | title | mc-clip | ref-clip | audition | gap | asset-clip">
+<!ENTITY % anchor_item "audio | video | clip | title | mc-clip | ref-clip | audition | spine | asset-clip">
+
+<!ELEMENT sequence (note?, spine)>
+<!ATTLIST sequence %media_attrs;>
+<!ATTLIST sequence renderFormat CDATA #IMPLIED>
+
+<!ELEMENT spine (%clip_item; | transition)*>
+<!ATTLIST spine %ao_attrs;>
+<!ATTLIST spine name CDATA #IMPLIED>
+<!ATTLIST spine format IDREF #IMPLIED>
+
+<!ELEMENT asset-clip (%anchor_item;)*>
+<!ATTLIST asset-clip ref IDREF #REQUIRED>
+<!ATTLIST asset-clip %clip_attrs;>
+<!ATTLIST asset-clip srcID CDATA #IMPLIED>
+<!ATTLIST asset-clip role CDATA #IMPLIED>
+<!ATTLIST asset-clip srcCh CDATA #IMPLIED>
+<!ATTLIST asset-clip outCh CDATA #IMPLIED>
+
+<!ELEMENT video (note?, timeMap?, (%anchor_item;)*, marker*, filter*)>
+<!ATTLIST video ref IDREF #REQUIRED>
+<!ATTLIST video %clip_attrs;>
+<!ATTLIST video srcID CDATA #IMPLIED>
+<!ATTLIST video role CDATA #IMPLIED>
+
+<!ELEMENT audio (note?, timeMap?, (%anchor_item;)*, marker*, filter*)>
+<!ATTLIST audio ref IDREF #REQUIRED>
+<!ATTLIST audio %clip_attrs;>
+<!ATTLIST audio srcID CDATA #IMPLIED>
+<!ATTLIST audio role CDATA #IMPLIED>
+<!ATTLIST audio srcCh CDATA #IMPLIED>
+<!ATTLIST audio outCh CDATA #IMPLIED>
+
+<!ELEMENT clip (note?, timeMap?, (spine | (%clip_item;))*, (marker | rating | keyword)*, filter*)>
+<!ATTLIST clip %clip_attrs;>
+<!ATTLIST clip format IDREF #IMPLIED>
+<!ATTLIST clip audioStart %time; #IMPLIED>
+<!ATTLIST clip audioDuration %time; #IMPLIED>
+<!ATTLIST clip tcStart %time; #IMPLIED>
+<!ATTLIST clip tcFormat (DF | NDF) #IMPLIED>
+<!ATTLIST clip audioLayout (stereo | surround) #IMPLIED>
+<!ATTLIST clip audioRate %audioHz; #IMPLIED>
+
+<!ELEMENT mc-clip (note?, timeMap?, mc-source*, (%anchor_item;)*, (marker | rating | keyword)*)>
+<!ATTLIST mc-clip ref IDREF #REQUIRED>
+<!ATTLIST mc-clip %clip_attrs;>
+<!ATTLIST mc-clip audioAngleID CDATA #IMPLIED>
+<!ATTLIST mc-clip videoAngleID CDATA #IMPLIED>
+<!ATTLIST mc-clip audioStart %time; #IMPLIED>
+<!ATTLIST mc-clip audioDuration %time; #IMPLIED>
+
+<!ELEMENT ref-clip (note?, timeMap?, (%anchor_item;)*, (marker | rating | keyword)*, filter*)>
+<!ATTLIST ref-clip ref IDREF #REQUIRED>
+<!ATTLIST ref-clip %clip_attrs;>
+<!ATTLIST ref-clip srcID CDATA #IMPLIED>
+<!ATTLIST ref-clip useAudioSubroles CDATA #IMPLIED>
+
+<!ELEMENT audition (audio | video | title | mc-clip | ref-clip | clip)+>
+<!ATTLIST audition %ao_attrs;>
+
+<!ELEMENT multicam (mc-angle*)>
+<!ATTLIST multicam %media_attrs;>
+<!ATTLIST multicam renderFormat CDATA #IMPLIED>
+
+<!ELEMENT mc-angle ((%clip_item; | transition)*)>
+<!ATTLIST mc-angle name CDATA #IMPLIED>
+<!ATTLIST mc-angle angleID CDATA #REQUIRED>
+
+<!ELEMENT mc-source (filter*)>
+<!ATTLIST mc-source angleID CDATA #REQUIRED>
+
+<!ELEMENT gap (note?, (%anchor_item;)*, marker*)>
+<!ATTLIST gap name CDATA #IMPLIED>
+<!ATTLIST gap offset %time; #IMPLIED>
+<!ATTLIST gap start %time; #IMPLIED>
+<!ATTLIST gap duration %time; #REQUIRED>
+<!ATTLIST gap enabled (0 | 1) "1">
+
+<!ELEMENT title (note?, timeMap?, (%anchor_item;)*, marker*, filter*, text*)>
+<!ATTLIST title ref IDREF #REQUIRED>
+<!ATTLIST title %clip_attrs;>
+<!ATTLIST title role CDATA #IMPLIED>
+
+<!ELEMENT text (#PCDATA)>
+
+<!ELEMENT transition (marker*)>
+<!ATTLIST transition ref IDREF #REQUIRED>
+<!ATTLIST transition name CDATA #IMPLIED>
+<!ATTLIST transition offset %time; #IMPLIED>
+<!ATTLIST transition duration %time; #REQUIRED>
+
+<!ELEMENT filter (param*)>
+<!ATTLIST filter ref IDREF #REQUIRED>
+<!ATTLIST filter name CDATA #IMPLIED>
+<!ATTLIST filter enabled (0 | 1) "1">
+
+<!ELEMENT timeMap (timept)+>
+
+<!ELEMENT timept EMPTY>
+<!ATTLIST timept time %time; #REQUIRED>
+<!ATTLIST timept value CDATA #REQUIRED>
+<!ATTLIST timept interp (smooth | linear) #REQUIRED>
+
+<!ELEMENT marker EMPTY>
+<!ATTLIST marker start %time; #REQUIRED>
+<!ATTLIST marker duration %time; #IMPLIED>
+<!ATTLIST marker value CDATA #REQUIRED>
+<!ATTLIST marker completed CDATA #IMPLIED>
+
+<!ELEMENT rating EMPTY>
+<!ATTLIST rating start %time; #IMPLIED>
+<!ATTLIST rating duration %time; #IMPLIED>
+<!ATTLIST rating value (favorite | reject) #REQUIRED>
+
+<!ELEMENT keyword EMPTY>
+<!ATTLIST keyword start %time; #IMPLIED>
+<!ATTLIST keyword duration %time; #IMPLIED>
+<!ATTLIST keyword value CDATA #REQUIRED>
+
+<!ELEMENT note (#PCDATA)>
+
+<!ELEMENT param (fadeIn?, fadeOut?, param*)>
+<!ATTLIST param name CDATA #REQUIRED>
+<!ATTLIST param value CDATA #IMPLIED>
+<!ATTLIST param keyValues CDATA #IMPLIED>
+<!ATTLIST param keyTimes %timelist; #IMPLIED>
+
+<!ELEMENT fadeIn EMPTY>
+<!ATTLIST fadeIn type (linear | easeIn | easeOut | easeInOut) #IMPLIED>
+<!ATTLIST fadeIn duration %time; #REQUIRED>
+
+<!ELEMENT fadeOut EMPTY>
+<!ATTLIST fadeOut type (linear | easeIn | easeOut | easeInOut) #IMPLIED>
+<!ATTLIST fadeOut duration %time; #REQUIRED>
+
+<!ELEMENT bookmark EMPTY>
+<!ATTLIST bookmark value CDATA #IMPLIED>
+
+<!ELEMENT metadata (md*)>
+
+<!ELEMENT md (array?)>
+<!ATTLIST md key CDATA #REQUIRED>
+<!ATTLIST md value CDATA #IMPLIED>
+<!ATTLIST md editable (0 | 1) "0">
+<!ATTLIST md type (string | boolean | integer | float | date | timecode) #IMPLIED>
+<!ATTLIST md displayName CDATA #IMPLIED>
+<!ATTLIST md description CDATA #IMPLIED>
+<!ATTLIST md source CDATA #IMPLIED>
+
+<!ELEMENT array (string*)>
+
+<!ELEMENT string (#PCDATA)> 

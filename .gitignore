@@ -176,3 +176,4 @@ cython_debug/
 tests/output
 docs/
 *.un~
+.DS_Store

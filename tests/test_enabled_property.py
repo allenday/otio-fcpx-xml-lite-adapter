@@ -16,6 +16,7 @@ class EnabledPropertyTest(unittest.TestCase):
         """Set up test data."""
         self.rate = 24.0
         self.timeline = otio.schema.Timeline(name="Enabled Property Test")
+        self.timeline.global_start_time = otio.opentime.RationalTime(0, self.rate)  # Add required frame rate
         
         # Create a video track
         video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)

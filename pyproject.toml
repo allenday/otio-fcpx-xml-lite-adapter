@@ -3,14 +3,14 @@
 
 [project]
 name = "otio-fcpx-xml-lite-adapter"
-version = "0.1.2"
+version = "0.2.0"
 description = "OpenTimelineIO FCP X XML Lite Adapter"
 authors = [
   { name="Allen Day", email="allenday@allenday.com" },
 ]
 license = "Apache-2.0"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.10"
 dependencies = [
     "opentimelineio >= 0.17.0"
 ]

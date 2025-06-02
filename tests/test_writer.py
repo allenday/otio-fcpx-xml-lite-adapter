@@ -14,6 +14,8 @@ from otio_fcpx_xml_lite_adapter.writer import FcpXmlWriter
 #from otio_fcpx_xml_lite_adapter import utils
 import re
 import logging
+import tempfile
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
 
         rate = 24.0
         timeline = otio.schema.Timeline(name="BabyGotBack Markers")
+        timeline.global_start_time = otio.opentime.RationalTime(0, rate)
 
         # --- Create Audio Track --- (Lane -1)
         audio_track = otio.schema.Track(name="Audio Track", kind=otio.schema.TrackKind.Audio)
@@ -227,7 +230,7 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         expected_asset_name = data["expected_asset_name"]
 
         # --- Assertions (Regex-based, focusing on counts and presence) --- #
-        self.assertIn('<fcpxml version="1.9">', fcpxml_string)
+        self.assertIn('<fcpxml version="1.13">', fcpxml_string)
         self.assertIn('<spine>', fcpxml_string)
 
         # Check for the single, shared Generator Effect Resource
@@ -301,14 +304,10 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
 
         # 1. Core Structure Checks
         self.assertEqual(root.tag, 'fcpxml', "XML Root tag mismatch")
-        resources = root.find('./resources')
-        self.assertIsNotNone(resources, "Missing <resources> element")
-        library = root.find('./library')
-        self.assertIsNotNone(library, "Missing <library> element")
-        event = library.find('./event')
-        self.assertIsNotNone(event, "Missing <event> element")
-        project = event.find('./project')
+        project = root.find('./project')
         self.assertIsNotNone(project, "Missing <project> element")
+        resources = project.find('./resources')
+        self.assertIsNotNone(resources, "Missing <resources> element")
         sequence = project.find('./sequence')
         self.assertIsNotNone(sequence, "Missing <sequence> element")
         spine = sequence.find('./spine')
@@ -317,8 +316,7 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertIsNotNone(container_gap, "Missing container <gap> in spine")
 
         # 2. Key Element Attributes
-        self.assertEqual(root.get('version'), '1.9', "fcpxml version attribute mismatch")
-        self.assertEqual(event.get('name'), timeline.name, "Event name mismatch")
+        self.assertEqual(root.get('version'), '1.13', "fcpxml version attribute mismatch")
         self.assertEqual(project.get('name'), timeline.name, "Project name mismatch")
 
         seq_format_id = sequence.get('format')
@@ -342,13 +340,12 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(format_elem.get('frameDuration'), '1/24s', "Format frameDuration mismatch")
         self.assertEqual(format_elem.get('name'), 'FFVideoFormat_OTIO_24', "Format name mismatch")
 
-        # Asset (expecting r2)
+        # Asset (expecting r2) - updated for new DTD structure
         asset_elem = resources.find('./asset[@id="r2"]')
         self.assertIsNotNone(asset_elem, "Asset resource r2 not found")
         self.assertEqual(asset_elem.get('name'), expected_asset_name, "Asset name mismatch")
-        media_rep = asset_elem.find('./media-rep')
-        self.assertIsNotNone(media_rep, "Missing media-rep in asset r2")
-        self.assertEqual(media_rep.get('src'), media_url, "Asset src mismatch")
+        # DTD now uses src attribute directly, not media-rep
+        self.assertEqual(asset_elem.get('src'), media_url, "Asset src mismatch")
         self.assertEqual(asset_elem.get('hasAudio'), '1', "Asset hasAudio mismatch")
         self.assertEqual(asset_elem.get('hasVideo'), '0', "Asset hasVideo mismatch")
 
@@ -364,7 +361,7 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertIsNotNone(audio_clip_elem, "Audio asset-clip (lane -1) not found in container gap")
         self.assertEqual(audio_clip_elem.get('name'), "Audio Clip", "Audio clip name mismatch")
         self.assertEqual(audio_clip_elem.get('ref'), 'r2', "Audio clip ref mismatch")
-        self.assertEqual(audio_clip_elem.get('audioRole'), 'dialogue', "Audio clip audioRole mismatch")
+        self.assertEqual(audio_clip_elem.get('role'), 'dialogue', "Audio clip role mismatch")  # Changed from audioRole
 
         video_clips_lane1 = container_gap.findall(f'./video[@lane="1"][@ref="{placeholder_resource_id}"]')
         self.assertTrue(len(video_clips_lane1) > 0, "No placeholder video clips found on lane 1 in container gap")
@@ -385,6 +382,244 @@ class AdapterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
 
         # print("[INFO Test 2] Detailed XML assertions passed.")
         logger.info("[Test `test_generated_fcpxml_structure`] Detailed XML assertions passed.")
+
+class WriterTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
+    """Test the FCPXML writer with XML validation against DTD"""
+    
+    def setUp(self):
+        self.dtd_path = os.path.join(os.path.dirname(__file__), 'dtds', 'fcpxml-1.13.dtd')
+        self.maxDiff = None
+    
+    def _validate_xml_against_dtd(self, xml_content):
+        """Validate XML content against FCPXML DTD using xmllint"""
+        try:
+            # Create temporary files for XML and DTD
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False) as xml_file:
+                xml_file.write(xml_content)
+                xml_file_path = xml_file.name
+            
+            # Validate using xmllint
+            result = subprocess.run([
+                'xmllint', '--noout', '--dtdvalid', self.dtd_path, xml_file_path
+            ], capture_output=True, text=True)
+            
+            # Clean up
+            os.unlink(xml_file_path)
+            
+            if result.returncode != 0:
+                self.fail(f"XML validation failed against DTD:\n{result.stderr}")
+            
+            return True
+            
+        except FileNotFoundError:
+            # Skip validation if xmllint is not available but warn
+            print("Warning: xmllint not available - XML validation skipped")
+            return True
+        except Exception as e:
+            self.fail(f"XML validation error: {e}")
+
+    def test_single_video_track(self):
+        """Test basic single video track export with DTD validation"""
+        timeline = otio.schema.Timeline(name="Single Video Track Timeline")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        # Add video track
+        video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Add video clip
+        clip_ref = otio.schema.ExternalReference(
+            target_url="file:///path/to/video.mov"
+        )
+        clip = otio.schema.Clip(
+            name="Video Clip",
+            media_reference=clip_ref,
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 25),
+                duration=otio.opentime.RationalTime(100, 25)
+            )
+        )
+        video_track.append(clip)
+        
+        # Generate FCPXML
+        writer = FcpXmlWriter(timeline)
+        xml_content = writer.build_xml_string()
+        
+        # Validate basic structure
+        root = ET.fromstring(xml_content)
+        self.assertEqual(root.tag, 'fcpxml')
+        self.assertEqual(root.get('version'), '1.13')
+        
+        # Find resources section
+        project = root.find('project')
+        self.assertIsNotNone(project)
+        resources = project.find('resources')
+        self.assertIsNotNone(resources)
+        
+        # Find format element
+        format_elem = resources.find('format')
+        self.assertIsNotNone(format_elem)
+        self.assertIsNotNone(format_elem.get('frameDuration'))
+        
+        # Find asset element
+        asset_elem = resources.find('asset')
+        self.assertIsNotNone(asset_elem)
+        self.assertEqual(asset_elem.get('src'), 'file:///path/to/video.mov')
+        
+        # Find sequence
+        sequence = project.find('sequence')
+        self.assertIsNotNone(sequence)
+        
+        # Find spine
+        spine = sequence.find('spine')
+        self.assertIsNotNone(spine)
+        
+        # Find asset-clip and verify NO frameDuration attribute
+        asset_clip = spine.find('.//asset-clip')
+        self.assertIsNotNone(asset_clip)
+        self.assertIsNone(asset_clip.get('frameDuration'), 
+                         "asset-clip should not have frameDuration attribute")
+        
+        # Validate against DTD
+        self._validate_xml_against_dtd(xml_content)
+
+    def test_multiple_frame_rates_no_invalid_attributes(self):
+        """Test multiple frame rates don't create invalid frameDuration attributes on clips"""
+        timeline = otio.schema.Timeline(name="Mixed Frame Rate Timeline")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        # Add video track
+        video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Add clips with different frame rates
+        clips_data = [
+            ("24fps", 24, "file:///path/to/24fps.mov"),
+            ("25fps", 25, "file:///path/to/25fps.mov"),
+            ("30fps", 30, "file:///path/to/30fps.mov"),
+        ]
+        
+        for name, fps, url in clips_data:
+            clip_ref = otio.schema.ExternalReference(target_url=url)
+            clip = otio.schema.Clip(
+                name=name,
+                media_reference=clip_ref,
+                source_range=otio.opentime.TimeRange(
+                    start_time=otio.opentime.RationalTime(0, fps),
+                    duration=otio.opentime.RationalTime(fps, fps)  # 1 second
+                )
+            )
+            video_track.append(clip)
+        
+        # Generate FCPXML
+        writer = FcpXmlWriter(timeline)
+        xml_content = writer.build_xml_string()
+        
+        # Parse and validate structure
+        root = ET.fromstring(xml_content)
+        
+        # Verify that NO asset-clip elements have frameDuration attributes
+        for asset_clip in root.findall('.//asset-clip'):
+            self.assertIsNone(asset_clip.get('frameDuration'),
+                            f"asset-clip '{asset_clip.get('name')}' should not have frameDuration attribute")
+        
+        # Validate against DTD
+        self._validate_xml_against_dtd(xml_content)
+
+    def test_audio_track_validates(self):
+        """Test audio track export with DTD validation"""
+        timeline = otio.schema.Timeline(name="Audio Timeline")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 48000)
+        
+        # Add audio track
+        audio_track = otio.schema.Track(name="Audio Track", kind=otio.schema.TrackKind.Audio)
+        timeline.tracks.append(audio_track)
+        
+        # Add audio clip
+        audio_ref = otio.schema.ExternalReference(target_url="file:///path/to/audio.wav")
+        audio_clip = otio.schema.Clip(
+            name="Audio Clip",
+            media_reference=audio_ref,
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, 48000),
+                duration=otio.opentime.RationalTime(48000, 48000)
+            )
+        )
+        audio_track.append(audio_clip)
+        
+        # Generate FCPXML
+        writer = FcpXmlWriter(timeline)
+        xml_content = writer.build_xml_string()
+        
+        # Basic structure validation
+        root = ET.fromstring(xml_content)
+        self.assertEqual(root.tag, 'fcpxml')
+        
+        # Validate against DTD
+        self._validate_xml_against_dtd(xml_content)
+
+    def test_empty_timeline_validates(self):
+        """Test that an empty timeline still generates valid FCPXML"""
+        timeline = otio.schema.Timeline(name="Empty Timeline")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        # Generate FCPXML
+        writer = FcpXmlWriter(timeline)
+        xml_content = writer.build_xml_string()
+        
+        # Basic structure validation
+        root = ET.fromstring(xml_content)
+        self.assertEqual(root.tag, 'fcpxml')
+        
+        # Validate against DTD
+        self._validate_xml_against_dtd(xml_content)
+
+    def test_fractional_frame_rates_validate(self):
+        """Test that fractional frame rates like 29.97 generate valid FCPXML"""
+        timeline = otio.schema.Timeline(name="Fractional Frame Rate Timeline")
+        timeline.global_start_time = otio.opentime.RationalTime(0, 25)
+        
+        # Add video track
+        video_track = otio.schema.Track(name="Video Track", kind=otio.schema.TrackKind.Video)
+        timeline.tracks.append(video_track)
+        
+        # Add clip with 29.97 fps (30000/1001)
+        from fractions import Fraction
+        rate_2997 = Fraction(30000, 1001)
+        
+        clip_ref = otio.schema.ExternalReference(target_url="file:///path/to/2997fps.mov")
+        clip = otio.schema.Clip(
+            name="29.97fps Clip",
+            media_reference=clip_ref,
+            source_range=otio.opentime.TimeRange(
+                start_time=otio.opentime.RationalTime(0, rate_2997),
+                duration=otio.opentime.RationalTime(rate_2997, rate_2997)  # 1 second
+            )
+        )
+        video_track.append(clip)
+        
+        # Generate FCPXML
+        writer = FcpXmlWriter(timeline)
+        xml_content = writer.build_xml_string()
+        
+        # Parse and validate structure
+        root = ET.fromstring(xml_content)
+        
+        # Verify format has correct frameDuration
+        format_elem = root.find('.//format')
+        self.assertIsNotNone(format_elem)
+        frame_duration = format_elem.get('frameDuration')
+        self.assertIsNotNone(frame_duration)
+        self.assertEqual(frame_duration, '1/25s')  # Timeline rate, not clip rate
+        
+        # Verify asset-clip has NO frameDuration
+        asset_clip = root.find('.//asset-clip')
+        self.assertIsNotNone(asset_clip)
+        self.assertIsNone(asset_clip.get('frameDuration'),
+                         "asset-clip should not have frameDuration attribute")
+        
+        # Validate against DTD
+        self._validate_xml_against_dtd(xml_content)
 
 
 if __name__ == '__main__':

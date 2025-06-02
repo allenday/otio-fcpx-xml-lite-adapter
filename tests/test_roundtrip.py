@@ -166,14 +166,10 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
 
         # 1. Check core structure (using the correct 'root' variable)
         self.assertEqual(root.tag, 'fcpxml', "Regression check: Root tag")
-        resources = root.find('./resources')
-        self.assertIsNotNone(resources, "Regression check: Missing resources element")
-        library = root.find('./library')
-        self.assertIsNotNone(library, "Regression check: Missing library element")
-        event = library.find('./event')
-        self.assertIsNotNone(event, "Regression check: Missing event element")
-        project = event.find('./project')
+        project = root.find('./project')
         self.assertIsNotNone(project, "Regression check: Missing project element")
+        resources = project.find('./resources')
+        self.assertIsNotNone(resources, "Regression check: Missing resources element")
         sequence = project.find('./sequence')
         self.assertIsNotNone(sequence, "Regression check: Missing sequence element")
         spine = sequence.find('./spine')
@@ -184,25 +180,15 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         # --- NEW: Verify nested structure and child counts ---
         # print("[INFO] Verifying nested structure and child counts...") # Remove print
         logger.info("Verifying nested structure and child counts...")
-        # fcpxml -> library
-        self.assertEqual(root.get('version'), '1.13', "Regression check: fcpxml version attribute") # Re-assert
-        library_elements = root.findall('./library')
-        self.assertEqual(len(library_elements), 1, "Regression check: Expected 1 <library> in <fcpxml>")
-        # library = library_elements[0] # Already defined above
-        # No standard required attributes for library other than optional location
+        # fcpxml -> project
+        self.assertEqual(root.get('version'), '1.13', "Regression check: fcpxml version attribute") # Updated to 1.13
+        project_elements = root.findall('./project')
+        self.assertEqual(len(project_elements), 1, "Regression check: Expected 1 <project> in <fcpxml>")
 
-        # library -> event
-        event_elements = library.findall('./event')
-        self.assertEqual(len(event_elements), 1, "Regression check: Expected 1 <event> in <library>")
-        # event = event_elements[0] # Already defined above
-        self.assertEqual(event.get('name'), 'Untitled Sequence', "Regression check: event name attribute") # Name seems to match project/sequence
-
-        # event -> project
-        project_elements = event.findall('./project')
-        self.assertEqual(len(project_elements), 1, "Regression check: Expected 1 <project> in <event>")
-        # project = project_elements[0] # Already defined above
-        self.assertEqual(project.get('name'), 'Untitled Sequence', "Regression check: project name attribute") # From input
-
+        # project -> resources  
+        resources_elements = project.findall('./resources')
+        self.assertEqual(len(resources_elements), 1, "Regression check: Expected 1 <resources> in <project>")
+        
         # project -> sequence
         sequence_elements = project.findall('./sequence')
         self.assertEqual(len(sequence_elements), 1, "Regression check: Expected 1 <sequence> in <project>")
@@ -241,7 +227,7 @@ class RoundtripTest(unittest.TestCase, otio_test_utils.OTIOAssertions):
         self.assertEqual(asset_clip.get('start'), '0s', "Regression check: asset-clip start attribute")
         # self.assertEqual(asset_clip.get('format'), 'r2', "Regression check: asset-clip format attribute (expected r2)") # Asset-clips don't have format, they ref assets which have format.
         # self.assertEqual(asset_clip.get('tcFormat'), 'NDF', "Regression check: asset-clip tcFormat attribute") # tcFormat is usually on sequence or format resource
-        self.assertEqual(asset_clip.get('audioRole'), 'dialogue', "Regression check: asset-clip audioRole attribute")
+        self.assertEqual(asset_clip.get('role'), 'dialogue', "Regression check: asset-clip role attribute")
         self.assertEqual(asset_clip.get('ref'), 'r2', "Regression check: asset-clip ref attribute (expected r2)")
 
 

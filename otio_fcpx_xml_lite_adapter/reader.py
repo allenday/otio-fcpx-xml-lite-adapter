@@ -28,15 +28,29 @@ class FcpXmlReader:
         # print(f"[Reader] Parsing FCPXML version: {self.fcpxml_version}")
         logger.info(f"Parsing FCPXML version: {self.fcpxml_version}")
 
-        self.resources_root = self.root.find('resources')
-        self.library_root = self.root.find('library')
-        if self.library_root is None:
-            raise otio.exceptions.OTIOError("No <library> element found in FCPXML.")
-
-        # Find the first sequence to process
-        self.sequence_element = self.library_root.find('.//sequence')
+        # Handle both old and new FCPXML structures
+        # New DTD-compliant structure: fcpxml > project > (resources, sequence)
+        # Old structure: fcpxml > (resources, library > event > project > sequence)
+        
+        self.project_root = self.root.find('project')
+        if self.project_root is not None:
+            # New DTD-compliant structure
+            self.resources_root = self.project_root.find('resources')
+            self.sequence_element = self.project_root.find('sequence')
+            logger.info("Using new DTD-compliant structure (fcpxml > project)")
+        else:
+            # Old structure
+            self.resources_root = self.root.find('resources')
+            self.library_root = self.root.find('library')
+            if self.library_root is None:
+                raise otio.exceptions.OTIOError("No <library> or <project> element found in FCPXML.")
+            
+            # Find the first sequence to process
+            self.sequence_element = self.library_root.find('.//sequence')
+            logger.info("Using legacy structure (fcpxml > library > event > project)")
+        
         if self.sequence_element is None:
-            raise otio.exceptions.OTIOError("No <sequence> element found within the library.")
+            raise otio.exceptions.OTIOError("No <sequence> element found in FCPXML.")
 
         # Parsed resources
         self.formats = {}
@@ -176,8 +190,15 @@ class FcpXmlReader:
 
         if ref_id and ref_id in self.assets:
             asset = self.assets[ref_id]
-            media_rep = asset.find('./media-rep')
-            media_url = media_rep.get('src') if media_rep is not None else None
+            # Handle both old and new asset structures
+            # New DTD structure: src attribute directly on asset
+            # Old structure: nested media-rep element with src
+            media_url = asset.get('src')  # Try new structure first
+            if not media_url:
+                # Fall back to old structure
+                media_rep = asset.find('./media-rep')
+                media_url = media_rep.get('src') if media_rep is not None else None
+            
             asset_start_frac = _parse_fcpx_time(asset.get('start', '0s'))
             asset_dur_frac = _parse_fcpx_time(asset.get('duration'))
             available_range = None

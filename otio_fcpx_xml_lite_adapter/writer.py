@@ -28,15 +28,14 @@ class FcpXmlWriter:
         self.timeline = input_otio
         logger.info("Initializing FcpXmlWriter")
 
-        # Basic structure setup
-        self.version = self.timeline.metadata.get('fcpx_version', '1.9') # Use stored version or default
-        self.root = ET.Element("fcpxml", version=self.version)
-        self.resources = ET.SubElement(self.root, "resources")
-        self.library = ET.SubElement(self.root, "library")
-        event_name = self.timeline.name or "OTIO Event"
-        self.event = ET.SubElement(self.library, "event", name=event_name)
+        # Basic structure setup - following DTD: fcpxml > project > (resources, sequence)
+        self.version = self.timeline.metadata.get('fcpx_version', '1.13') # Use stored version or default
+        self.root = ET.Element("fcpxml", version="1.13")
+        
+        # DTD structure: project contains resources and sequence
         project_name = self.timeline.name or "OTIO Project"
-        self.project = ET.SubElement(self.event, "project", name=project_name)
+        self.project = ET.SubElement(self.root, "project", name=project_name)
+        self.resources = ET.SubElement(self.project, "resources")
 
         # Resource Management State
         self.resource_map_assets = {}
@@ -50,8 +49,11 @@ class FcpXmlWriter:
         # Timing and Structure State
         self.global_start_time = self.timeline.global_start_time
         if self.global_start_time is None:
-            logger.warning("OTIO timeline missing global_start_time. Defaulting to 0 @ 24fps.")
-            self.global_start_time = otio.opentime.RationalTime(0, 24)
+            raise otio.exceptions.OTIOError(
+                "Timeline.global_start_time is required but is None. "
+                "Please set timeline.global_start_time to specify the project frame rate. "
+                "Example: timeline.global_start_time = otio.opentime.RationalTime(0, 25)  # for 25fps"
+            )
         self.global_rate = self.global_start_time.rate
         self.timeline_duration = self.timeline.duration()
         self.seq_duration_str = _fcpx_time_str(self.timeline_duration)
@@ -70,7 +72,6 @@ class FcpXmlWriter:
         self._create_sequence_element()
         self._map_tracks_to_lanes()
         self._create_main_container_gap()
-
 
     def _ensure_resource(self, key, map_dict, element_dict, element_generator):
         """Gets or creates a resource ID and its corresponding XML element."""
@@ -102,9 +103,9 @@ class FcpXmlWriter:
         rate_num, rate_den = rate_key.as_integer_ratio()
         frame_dur_frac = Fraction(rate_den, rate_num).limit_denominator()
         frame_dur_str = f"{frame_dur_frac.numerator}/{frame_dur_frac.denominator}s" if frame_dur_frac.denominator != 1 else f"{frame_dur_frac.numerator}s"
+        # DTD only allows: id, name, frameDuration, fieldOrder, width, height, paspH, paspV
         fmt = ET.Element("format", id=fmt_id, name=f"FFVideoFormat_OTIO_{int(rate_key)}",
-                             frameDuration=frame_dur_str, width="1920", height="1080", # TODO: Get resolution?
-                             colorSpace="1-1-1 (Rec. 709)")
+                             frameDuration=frame_dur_str, width="1920", height="1080") # TODO: Get resolution?
         self.format_elements[fmt_id] = fmt
 
     def _ensure_sequence_format(self):
@@ -210,11 +211,20 @@ class FcpXmlWriter:
         asset_start_str = _fcpx_time_str(asset_start_rt)
         has_audio = "1" if track_kind == otio.schema.TrackKind.Audio else "0" # FAKE
         has_video = "1" if track_kind == otio.schema.TrackKind.Video else "0" # FAKE
-        asset = ET.Element("asset", id=asset_id, name=os.path.basename(url_key) or f"Asset_{asset_id}",
-                             start=asset_start_str, duration=asset_duration_str,
-                             hasAudio=has_audio, hasVideo=has_video,
-                             audioRate="48k", audioChannels="2") # Defaults
-        ET.SubElement(asset, "media-rep", kind="original-media", src=url_key)
+        
+        # DTD requires src attribute directly on asset, not nested media-rep
+        asset = ET.Element("asset", 
+                          id=asset_id, 
+                          name=os.path.basename(url_key) or f"Asset_{asset_id}",
+                          src=url_key,  # DTD: src is required attribute on asset
+                          start=asset_start_str, 
+                          duration=asset_duration_str,
+                          hasAudio=has_audio, 
+                          hasVideo=has_video,
+                          audioRate="48k", 
+                          audioChannels="2") # Defaults
+        
+        # Removed media-rep creation - not valid per DTD
         self.asset_elements[asset_id] = asset
         logger.debug(f"[Created minimal asset resource: {asset_id} (Needs context improvement)")
 
@@ -309,11 +319,18 @@ class FcpXmlWriter:
             asset_start_str = _fcpx_time_str(asset_start_rt)
             has_audio = "1" if track.kind == otio.schema.TrackKind.Audio else "0"
             has_video = "1" if track.kind == otio.schema.TrackKind.Video else "0"
-            asset = ET.Element("asset", id=asset_id, name=os.path.basename(url_key) or f"Asset_{asset_id}",
-                                 start=asset_start_str, duration=asset_duration_str,
-                                 hasAudio=has_audio, hasVideo=has_video,
-                                 audioRate="48k", audioChannels="2") # Defaults
-            ET.SubElement(asset, "media-rep", kind="original-media", src=url_key)
+            # DTD requires src attribute directly on asset, not nested media-rep
+            asset = ET.Element("asset", 
+                              id=asset_id, 
+                              name=os.path.basename(url_key) or f"Asset_{asset_id}",
+                              src=url_key,  # DTD: src is required attribute on asset
+                              start=asset_start_str, 
+                              duration=asset_duration_str,
+                              hasAudio=has_audio, 
+                              hasVideo=has_video,
+                              audioRate="48k", 
+                              audioChannels="2") # Defaults
+            # Removed media-rep creation - not valid per DTD
             self.asset_elements[asset_id] = asset
             logger.debug(f"Created asset resource: {asset_id}")
 
@@ -328,19 +345,6 @@ class FcpXmlWriter:
             "start": _fcpx_time_str(item.source_range.start_time)
         }
         
-        # Add per-asset frame rate support
-        # Extract frame rate from clip's source_range and add frameDuration attribute
-        if item.source_range and item.source_range.duration:
-            # Get the exact rate from the RationalTime object to preserve fractional rates
-            clip_rate = item.source_range.duration.rate
-            # Convert rate to fraction and then invert to get frame duration
-            # For 29.97 fps, rate is 30000/1001, so frame duration is 1001/30000
-            rate_num, rate_den = clip_rate.as_integer_ratio()
-            frame_dur_frac = Fraction(rate_den, rate_num).limit_denominator()
-            frame_dur_str = f"{frame_dur_frac.numerator}/{frame_dur_frac.denominator}s" if frame_dur_frac.denominator != 1 else f"{frame_dur_frac.numerator}s"
-            clip_elem_attrs["frameDuration"] = frame_dur_str
-            logger.debug(f"Set frameDuration for clip '{item.name}': {frame_dur_str} (source rate: {clip_rate})")
-        
         # Asset clips always get lane attribute in container gap structure
         clip_elem_attrs["lane"] = str(lane)
         logger.debug(f"Adding Lane Attr (Container): {lane}")
@@ -352,7 +356,7 @@ class FcpXmlWriter:
         item_elem = ET.Element("asset-clip", **clip_elem_attrs)
 
         if track.kind == otio.schema.TrackKind.Audio:
-            item_elem.set("audioRole", "dialogue")
+            item_elem.set("role", "dialogue")  # DTD specifies "role", not "audioRole"
 
         self._add_markers_to_element(item_elem, item)
         return item_elem
