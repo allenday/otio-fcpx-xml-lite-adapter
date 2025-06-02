@@ -327,6 +327,20 @@ class FcpXmlWriter:
             "duration": _fcpx_time_str(item_duration),
             "start": _fcpx_time_str(item.source_range.start_time)
         }
+        
+        # Add per-asset frame rate support
+        # Extract frame rate from clip's source_range and add frameDuration attribute
+        if item.source_range and item.source_range.duration:
+            # Get the exact rate from the RationalTime object to preserve fractional rates
+            clip_rate = item.source_range.duration.rate
+            # Convert rate to fraction and then invert to get frame duration
+            # For 29.97 fps, rate is 30000/1001, so frame duration is 1001/30000
+            rate_num, rate_den = clip_rate.as_integer_ratio()
+            frame_dur_frac = Fraction(rate_den, rate_num).limit_denominator()
+            frame_dur_str = f"{frame_dur_frac.numerator}/{frame_dur_frac.denominator}s" if frame_dur_frac.denominator != 1 else f"{frame_dur_frac.numerator}s"
+            clip_elem_attrs["frameDuration"] = frame_dur_str
+            logger.debug(f"Set frameDuration for clip '{item.name}': {frame_dur_str} (source rate: {clip_rate})")
+        
         # Asset clips always get lane attribute in container gap structure
         clip_elem_attrs["lane"] = str(lane)
         logger.debug(f"Adding Lane Attr (Container): {lane}")
